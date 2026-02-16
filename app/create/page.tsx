@@ -40,5 +40,5 @@ export default async function CreatePage() {
     ...(adults ?? []).map((a) => ({ id: a.id, type: "adult" as const, label: a.display_name })),
   ];
 
-  return <CreateStoryWizard characterOptions={characterOptions} />;
+  return <CreateStoryWizard universeId={universe.id} characterOptions={characterOptions} />;
 }

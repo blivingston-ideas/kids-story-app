@@ -12,6 +12,7 @@ export const wizardInputSchema = z
     guidedBeginning: z.string().trim().max(400).optional().default(""),
     guidedMiddle: z.string().trim().max(400).optional().default(""),
     guidedEnding: z.string().trim().max(400).optional().default(""),
+    stage: z.string().trim().max(800).optional().default(""),
     tone: z.enum(["calm", "silly", "adventurous"]),
     lengthChoice: z.enum(["5", "10", "20", "custom"]),
     customMinutes: z.string().trim().optional().default(""),
@@ -19,36 +20,13 @@ export const wizardInputSchema = z
     customCharacterName: z.string().trim().max(80).optional().default(""),
   })
   .superRefine((data, ctx) => {
-    if (data.mode === "guided") {
-      if (!data.guidedBeginning) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: ["guidedBeginning"],
-          message: "Beginning beat is required for guided mode.",
-        });
-      }
-      if (!data.guidedMiddle) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: ["guidedMiddle"],
-          message: "Middle beat is required for guided mode.",
-        });
-      }
-      if (!data.guidedEnding) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: ["guidedEnding"],
-          message: "Ending beat is required for guided mode.",
-        });
-      }
-    }
     if (data.lengthChoice === "custom") {
       const minutes = Number(data.customMinutes);
-      if (!Number.isFinite(minutes) || minutes < 1 || minutes > 120) {
+      if (!Number.isFinite(minutes) || minutes < 1 || minutes > 60) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
           path: ["customMinutes"],
-          message: "Custom minutes must be between 1 and 120.",
+          message: "Custom minutes must be between 1 and 60.",
         });
       }
     }
@@ -63,8 +41,8 @@ export type WizardInput = z.infer<typeof wizardInputSchema>;
 export type CharacterRef = z.infer<typeof characterRefSchema>;
 
 export function parseLengthMinutes(input: WizardInput): number {
-  if (input.lengthChoice === "custom") return Math.trunc(Number(input.customMinutes));
-  return Number(input.lengthChoice);
+  const minutes = input.lengthChoice === "custom" ? Math.trunc(Number(input.customMinutes)) : Number(input.lengthChoice);
+  return Math.max(1, Math.min(60, minutes));
 }
 
 export function parseCharacterRefs(rawJson: string): CharacterRef[] {
