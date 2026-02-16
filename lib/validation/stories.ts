@@ -1,0 +1,83 @@
+import { z } from "zod";
+
+export const characterRefSchema = z.object({
+  type: z.enum(["kid", "adult"]),
+  id: z.string().uuid("Invalid character id"),
+  label: z.string().trim().min(1).max(120),
+});
+
+export const wizardInputSchema = z
+  .object({
+    mode: z.enum(["surprise", "guided"]),
+    guidedBeginning: z.string().trim().max(400).optional().default(""),
+    guidedMiddle: z.string().trim().max(400).optional().default(""),
+    guidedEnding: z.string().trim().max(400).optional().default(""),
+    tone: z.enum(["calm", "silly", "adventurous"]),
+    lengthChoice: z.enum(["5", "10", "20", "custom"]),
+    customMinutes: z.string().trim().optional().default(""),
+    selectedCharactersJson: z.string().trim().optional().default("[]"),
+    customCharacterName: z.string().trim().max(80).optional().default(""),
+  })
+  .superRefine((data, ctx) => {
+    if (data.mode === "guided") {
+      if (!data.guidedBeginning) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["guidedBeginning"],
+          message: "Beginning beat is required for guided mode.",
+        });
+      }
+      if (!data.guidedMiddle) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["guidedMiddle"],
+          message: "Middle beat is required for guided mode.",
+        });
+      }
+      if (!data.guidedEnding) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["guidedEnding"],
+          message: "Ending beat is required for guided mode.",
+        });
+      }
+    }
+    if (data.lengthChoice === "custom") {
+      const minutes = Number(data.customMinutes);
+      if (!Number.isFinite(minutes) || minutes < 1 || minutes > 120) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["customMinutes"],
+          message: "Custom minutes must be between 1 and 120.",
+        });
+      }
+    }
+  });
+
+export const generatedStorySchema = z.object({
+  title: z.string().trim().min(1).max(160),
+  content: z.string().trim().min(1),
+});
+
+export type WizardInput = z.infer<typeof wizardInputSchema>;
+export type CharacterRef = z.infer<typeof characterRefSchema>;
+
+export function parseLengthMinutes(input: WizardInput): number {
+  if (input.lengthChoice === "custom") return Math.trunc(Number(input.customMinutes));
+  return Number(input.lengthChoice);
+}
+
+export function parseCharacterRefs(rawJson: string): CharacterRef[] {
+  let parsed: unknown = [];
+  try {
+    parsed = JSON.parse(rawJson || "[]");
+  } catch {
+    throw new Error("Invalid character selection payload.");
+  }
+
+  const result = z.array(characterRefSchema).safeParse(parsed);
+  if (!result.success) {
+    throw new Error(result.error.issues[0]?.message ?? "Invalid character selection.");
+  }
+  return result.data;
+}
