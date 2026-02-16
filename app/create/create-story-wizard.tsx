@@ -1,7 +1,9 @@
-﻿"use client";
+"use client";
 
 import { useMemo, useState } from "react";
 import { saveStoryAction } from "@/app/create/actions";
+import StoryGenerationProgress from "@/components/StoryGenerationProgress";
+import { useStoryGenerationProgress } from "@/hooks/useStoryGenerationProgress";
 
 type CharacterOption = {
   id: string;
@@ -36,9 +38,14 @@ export default function CreateStoryWizard({ universeId, characterOptions }: Prop
   const [lengthChoice, setLengthChoice] = useState<"5" | "10" | "20" | "custom">("10");
   const [customMinutes, setCustomMinutes] = useState("15");
   const [customCharacterName, setCustomCharacterName] = useState("");
+  const [audienceAge, setAudienceAge] = useState("6");
   const [stage, setStage] = useState("");
   const [selectedCharacterKeys, setSelectedCharacterKeys] = useState<string[]>([]);
   const [generating, setGenerating] = useState(false);
+  const [createPanelCollapsed, setCreatePanelCollapsed] = useState(false);
+  const [loadingPanelCollapsed, setLoadingPanelCollapsed] = useState(false);
+  const { phase, progress, error: progressError, start, complete, fail, reset } =
+    useStoryGenerationProgress();
 
   const [generateState, setGenerateState] = useState<GenerateState>({
     ok: false,
@@ -80,6 +87,12 @@ export default function CreateStoryWizard({ universeId, characterOptions }: Prop
 
   async function handleGenerate(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
+    if (generating) return;
+
+    setCreatePanelCollapsed(true);
+    setLoadingPanelCollapsed(false);
+    reset();
+    start();
     setGenerating(true);
     setGenerateState((prev) => ({ ...prev, error: null }));
 
@@ -105,6 +118,7 @@ export default function CreateStoryWizard({ universeId, characterOptions }: Prop
           tone,
           lengthMinutes: getLengthMinutes(),
           surpriseVsGuided: mode,
+          audienceAge: Number(audienceAge),
           optionalPrompt,
         }),
       });
@@ -123,6 +137,10 @@ export default function CreateStoryWizard({ universeId, characterOptions }: Prop
         throw new Error(payload.error ?? "Failed to generate story.");
       }
 
+      await complete();
+      setLoadingPanelCollapsed(true);
+      setCreatePanelCollapsed(true);
+
       setGenerateState({
         ok: true,
         error: null,
@@ -137,6 +155,8 @@ export default function CreateStoryWizard({ universeId, characterOptions }: Prop
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Could not generate story.";
+      fail(message);
+      setLoadingPanelCollapsed(false);
       setGenerateState((prev) => ({ ...prev, ok: false, error: message }));
     } finally {
       setGenerating(false);
@@ -148,190 +168,308 @@ export default function CreateStoryWizard({ universeId, characterOptions }: Prop
     (customMinutes.trim().length > 0 && Number(customMinutes) >= 1 && Number(customMinutes) <= 60);
 
   const canGenerate =
-    customMinutesValid && (selectedCharacters.length > 0 || customCharacterName.trim().length > 0);
+    customMinutesValid &&
+    Number.isFinite(Number(audienceAge)) &&
+    Number(audienceAge) >= 1 &&
+    Number(audienceAge) <= 17 &&
+    (selectedCharacters.length > 0 || customCharacterName.trim().length > 0);
+
+  const showProgressPanel = generating || phase === "error" || phase === "done";
+  const currentLengthLabel = lengthChoice === "custom" ? `${customMinutes} min` : `${lengthChoice} min`;
 
   return (
     <main className="min-h-screen bg-neutral-50">
       <div className="mx-auto max-w-4xl px-6 py-10 space-y-6">
         <div className="rounded-3xl border border-neutral-200 bg-white p-6 shadow-sm">
-          <h1 className="text-2xl font-semibold tracking-tight">Create Story</h1>
-          <p className="mt-2 text-sm text-neutral-600">Shape your story, then make it real.</p>
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <h1 className="text-2xl font-semibold tracking-tight">Create Story</h1>
+              <p className="mt-2 text-sm text-neutral-600">
+                {createPanelCollapsed
+                  ? "Create form is minimized. Expand to see your inputs."
+                  : "Shape your story, then make it real."}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setCreatePanelCollapsed((prev) => !prev)}
+              className="rounded-xl border border-neutral-300 bg-white px-3 py-2 text-xs font-medium text-neutral-900 hover:bg-neutral-100"
+            >
+              {createPanelCollapsed ? "Expand details" : "Minimize"}
+            </button>
+          </div>
 
-          <form onSubmit={handleGenerate} className="mt-6 space-y-5">
-            <section className="rounded-2xl border border-neutral-200 bg-neutral-50 p-4 space-y-3">
-              <h2 className="text-sm font-semibold uppercase tracking-wide text-neutral-700">1. Mode</h2>
-              <div className="grid gap-3 sm:grid-cols-2">
-                <button
-                  type="button"
-                  onClick={() => setMode("surprise")}
-                  className={`rounded-2xl border px-4 py-3 text-left text-sm ${
-                    mode === "surprise"
-                      ? "border-neutral-900 bg-neutral-900 text-white"
-                      : "border-neutral-300 bg-white text-neutral-900"
-                  }`}
-                >
-                  Surprise
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setMode("guided")}
-                  className={`rounded-2xl border px-4 py-3 text-left text-sm ${
-                    mode === "guided"
-                      ? "border-neutral-900 bg-neutral-900 text-white"
-                      : "border-neutral-300 bg-white text-neutral-900"
-                  }`}
-                >
-                  Guided
-                </button>
-              </div>
-              {mode === "guided" ? (
-                <div className="grid gap-3">
-                  <input
-                    value={guidedBeginning}
-                    onChange={(e) => setGuidedBeginning(e.target.value)}
-                    placeholder="Beginning beat (optional)"
-                    className="w-full rounded-2xl border border-neutral-300 px-4 py-3 text-sm"
-                  />
-                  <input
-                    value={guidedMiddle}
-                    onChange={(e) => setGuidedMiddle(e.target.value)}
-                    placeholder="Middle beat (optional)"
-                    className="w-full rounded-2xl border border-neutral-300 px-4 py-3 text-sm"
-                  />
-                  <input
-                    value={guidedEnding}
-                    onChange={(e) => setGuidedEnding(e.target.value)}
-                    placeholder="End beat (optional)"
-                    className="w-full rounded-2xl border border-neutral-300 px-4 py-3 text-sm"
-                  />
-                </div>
-              ) : null}
-            </section>
+          {createPanelCollapsed ? (
+            <div className="mt-4 flex flex-wrap gap-2 text-xs">
+              <span className="rounded-full bg-neutral-100 px-3 py-1 font-medium text-neutral-700 capitalize">
+                {mode}
+              </span>
+              <span className="rounded-full bg-neutral-100 px-3 py-1 font-medium text-neutral-700 capitalize">
+                {tone}
+              </span>
+              <span className="rounded-full bg-neutral-100 px-3 py-1 font-medium text-neutral-700">
+                {currentLengthLabel}
+              </span>
+              <span className="rounded-full bg-neutral-100 px-3 py-1 font-medium text-neutral-700">
+                Audience age {audienceAge}
+              </span>
+            </div>
+          ) : null}
 
-            <section className="rounded-2xl border border-neutral-200 bg-neutral-50 p-4 space-y-3">
-              <h2 className="text-sm font-semibold uppercase tracking-wide text-neutral-700">2. Characters</h2>
-              <div className="grid gap-3 sm:grid-cols-2">
-                {characterOptions.map((character) => {
-                  const key = `${character.type}:${character.id}`;
-                  const checked = selectedCharacterKeys.includes(key);
-                  return (
-                    <label
-                      key={key}
-                      className="flex items-center justify-between rounded-2xl border border-neutral-300 bg-white px-4 py-3 text-sm"
-                    >
-                      <span>
-                        {character.label} <span className="text-neutral-500">({character.type})</span>
-                      </span>
-                      <input
-                        type="checkbox"
-                        checked={checked}
-                        onChange={() => toggleCharacter(key)}
-                        className="h-4 w-4"
-                      />
-                    </label>
-                  );
-                })}
-              </div>
-              <input
-                value={customCharacterName}
-                onChange={(e) => setCustomCharacterName(e.target.value)}
-                placeholder="Optional custom character name"
-                className="w-full rounded-2xl border border-neutral-300 bg-white px-4 py-3 text-sm"
-              />
-              <div className="flex flex-wrap gap-2">
-                {selectedCharacters.map((c) => (
-                  <span
-                    key={`${c.type}:${c.id}`}
-                    className="rounded-full bg-neutral-900 px-3 py-1 text-xs font-medium text-white"
-                  >
-                    {c.label}
-                  </span>
-                ))}
-                {customCharacterName.trim() ? (
-                  <span className="rounded-full bg-neutral-200 px-3 py-1 text-xs font-medium text-neutral-800">
-                    {customCharacterName.trim()} (custom)
-                  </span>
-                ) : null}
-              </div>
-            </section>
-
-            <section className="rounded-2xl border border-neutral-200 bg-neutral-50 p-4 space-y-3">
-              <h2 className="text-sm font-semibold uppercase tracking-wide text-neutral-700">3. Length</h2>
-              <div className="grid gap-3 sm:grid-cols-4">
-                {(["5", "10", "20", "custom"] as const).map((choice) => (
+          <form
+            onSubmit={handleGenerate}
+            className={`mt-6 space-y-5 ${createPanelCollapsed ? "hidden" : ""}`}
+          >
+            <fieldset disabled={generating} className="space-y-5 disabled:opacity-75">
+              <section className="rounded-2xl border border-neutral-200 bg-neutral-50 p-4 space-y-3">
+                <h2 className="text-sm font-semibold uppercase tracking-wide text-neutral-700">1. Mode</h2>
+                <div className="grid gap-3 sm:grid-cols-2">
                   <button
-                    key={choice}
                     type="button"
-                    onClick={() => setLengthChoice(choice)}
-                    className={`rounded-2xl border px-4 py-3 text-sm ${
-                      lengthChoice === choice
+                    onClick={() => setMode("surprise")}
+                    className={`rounded-2xl border px-4 py-3 text-left text-sm ${
+                      mode === "surprise"
                         ? "border-neutral-900 bg-neutral-900 text-white"
                         : "border-neutral-300 bg-white text-neutral-900"
                     }`}
                   >
-                    {choice === "custom" ? "Custom" : `${choice} min`}
+                    Surprise
                   </button>
-                ))}
-              </div>
-              {lengthChoice === "custom" ? (
+                  <button
+                    type="button"
+                    onClick={() => setMode("guided")}
+                    className={`rounded-2xl border px-4 py-3 text-left text-sm ${
+                      mode === "guided"
+                        ? "border-neutral-900 bg-neutral-900 text-white"
+                        : "border-neutral-300 bg-white text-neutral-900"
+                    }`}
+                  >
+                    Guided
+                  </button>
+                </div>
+                {mode === "guided" ? (
+                  <div className="grid gap-3">
+                    <input
+                      value={guidedBeginning}
+                      onChange={(e) => setGuidedBeginning(e.target.value)}
+                      placeholder="Beginning beat (optional)"
+                      className="w-full rounded-2xl border border-neutral-300 px-4 py-3 text-sm"
+                    />
+                    <input
+                      value={guidedMiddle}
+                      onChange={(e) => setGuidedMiddle(e.target.value)}
+                      placeholder="Middle beat (optional)"
+                      className="w-full rounded-2xl border border-neutral-300 px-4 py-3 text-sm"
+                    />
+                    <input
+                      value={guidedEnding}
+                      onChange={(e) => setGuidedEnding(e.target.value)}
+                      placeholder="End beat (optional)"
+                      className="w-full rounded-2xl border border-neutral-300 px-4 py-3 text-sm"
+                    />
+                  </div>
+                ) : null}
+              </section>
+
+              <section className="rounded-2xl border border-neutral-200 bg-neutral-50 p-4 space-y-3">
+                <h2 className="text-sm font-semibold uppercase tracking-wide text-neutral-700">2. Characters</h2>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  {characterOptions.map((character) => {
+                    const key = `${character.type}:${character.id}`;
+                    const checked = selectedCharacterKeys.includes(key);
+                    return (
+                      <label
+                        key={key}
+                        className="flex items-center justify-between rounded-2xl border border-neutral-300 bg-white px-4 py-3 text-sm"
+                      >
+                        <span>
+                          {character.label} <span className="text-neutral-500">({character.type})</span>
+                        </span>
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() => toggleCharacter(key)}
+                          className="h-4 w-4"
+                        />
+                      </label>
+                    );
+                  })}
+                </div>
                 <input
-                  value={customMinutes}
-                  onChange={(e) => setCustomMinutes(e.target.value)}
-                  inputMode="numeric"
-                  placeholder="Custom minutes (1-60)"
+                  value={customCharacterName}
+                  onChange={(e) => setCustomCharacterName(e.target.value)}
+                  placeholder="Optional custom character name"
                   className="w-full rounded-2xl border border-neutral-300 bg-white px-4 py-3 text-sm"
                 />
-              ) : null}
-            </section>
+                <div className="flex flex-wrap gap-2">
+                  {selectedCharacters.map((c) => (
+                    <span
+                      key={`${c.type}:${c.id}`}
+                      className="rounded-full bg-neutral-900 px-3 py-1 text-xs font-medium text-white"
+                    >
+                      {c.label}
+                    </span>
+                  ))}
+                  {customCharacterName.trim() ? (
+                    <span className="rounded-full bg-neutral-200 px-3 py-1 text-xs font-medium text-neutral-800">
+                      {customCharacterName.trim()} (custom)
+                    </span>
+                  ) : null}
+                </div>
+              </section>
 
-            <section className="rounded-2xl border border-neutral-200 bg-neutral-50 p-4 space-y-3">
-              <h2 className="text-sm font-semibold uppercase tracking-wide text-neutral-700">4. Tone</h2>
-              <div className="grid gap-3 sm:grid-cols-3">
-                {([
-                  { id: "calm", label: "Calm bedtime" },
-                  { id: "silly", label: "Silly" },
-                  { id: "adventurous", label: "Adventurous" },
-                ] as const).map((t) => (
-                  <button
-                    key={t.id}
-                    type="button"
-                    onClick={() => setTone(t.id)}
-                    className={`rounded-2xl border px-4 py-3 text-sm ${
-                      tone === t.id
-                        ? "border-neutral-900 bg-neutral-900 text-white"
-                        : "border-neutral-300 bg-white text-neutral-900"
-                    }`}
-                  >
-                    {t.label}
-                  </button>
-                ))}
+              <section className="rounded-2xl border border-neutral-200 bg-neutral-50 p-4 space-y-3">
+                <h2 className="text-sm font-semibold uppercase tracking-wide text-neutral-700">3. Audience age</h2>
+                <input
+                  value={audienceAge}
+                  onChange={(e) => setAudienceAge(e.target.value)}
+                  inputMode="numeric"
+                  placeholder="Age (e.g. 6)"
+                  className="w-full rounded-2xl border border-neutral-300 bg-white px-4 py-3 text-sm"
+                />
+                <p className="text-xs text-neutral-600">
+                  We combine this with selected kids&apos; ages to tune sentence length for reading level.
+                </p>
+              </section>
+
+              <section className="rounded-2xl border border-neutral-200 bg-neutral-50 p-4 space-y-3">
+                <h2 className="text-sm font-semibold uppercase tracking-wide text-neutral-700">4. Length</h2>
+                <div className="grid gap-3 sm:grid-cols-4">
+                  {(["5", "10", "20", "custom"] as const).map((choice) => (
+                    <button
+                      key={choice}
+                      type="button"
+                      onClick={() => setLengthChoice(choice)}
+                      className={`rounded-2xl border px-4 py-3 text-sm ${
+                        lengthChoice === choice
+                          ? "border-neutral-900 bg-neutral-900 text-white"
+                          : "border-neutral-300 bg-white text-neutral-900"
+                      }`}
+                    >
+                      {choice === "custom" ? "Custom" : `${choice} min`}
+                    </button>
+                  ))}
+                </div>
+                {lengthChoice === "custom" ? (
+                  <input
+                    value={customMinutes}
+                    onChange={(e) => setCustomMinutes(e.target.value)}
+                    inputMode="numeric"
+                    placeholder="Custom minutes (1-60)"
+                    className="w-full rounded-2xl border border-neutral-300 bg-white px-4 py-3 text-sm"
+                  />
+                ) : null}
+              </section>
+
+              <section className="rounded-2xl border border-neutral-200 bg-neutral-50 p-4 space-y-3">
+                <h2 className="text-sm font-semibold uppercase tracking-wide text-neutral-700">5. Tone</h2>
+                <div className="grid gap-3 sm:grid-cols-3">
+                  {([
+                    { id: "calm", label: "Calm bedtime" },
+                    { id: "silly", label: "Silly" },
+                    { id: "adventurous", label: "Adventurous" },
+                  ] as const).map((t) => (
+                    <button
+                      key={t.id}
+                      type="button"
+                      onClick={() => setTone(t.id)}
+                      className={`rounded-2xl border px-4 py-3 text-sm ${
+                        tone === t.id
+                          ? "border-neutral-900 bg-neutral-900 text-white"
+                          : "border-neutral-300 bg-white text-neutral-900"
+                      }`}
+                    >
+                      {t.label}
+                    </button>
+                  ))}
+                </div>
+              </section>
+
+              <section className="rounded-2xl border border-neutral-200 bg-neutral-50 p-4 space-y-3">
+                <h2 className="text-sm font-semibold uppercase tracking-wide text-neutral-700">6. Set the stage</h2>
+                <textarea
+                  value={stage}
+                  onChange={(e) => setStage(e.target.value)}
+                  rows={5}
+                  placeholder="What's happening? Where are we? What do you want the kids to experience or learn?"
+                  className="w-full rounded-2xl border border-neutral-300 bg-white px-4 py-3 text-sm outline-none transition focus:border-neutral-900 focus:ring-4 focus:ring-neutral-900/10"
+                />
+              </section>
+
+              <div className="flex justify-end">
+                <button
+                  type="submit"
+                  disabled={generating || !canGenerate}
+                  className="rounded-2xl bg-neutral-900 px-5 py-3 text-sm font-medium text-white shadow-sm transition hover:bg-neutral-800 disabled:opacity-50"
+                >
+                  {generating ? "Creating your story..." : "Make the story real!"}
+                </button>
               </div>
-            </section>
-
-            <section className="rounded-2xl border border-neutral-200 bg-neutral-50 p-4 space-y-3">
-              <h2 className="text-sm font-semibold uppercase tracking-wide text-neutral-700">5. Set the stage</h2>
-              <textarea
-                value={stage}
-                onChange={(e) => setStage(e.target.value)}
-                rows={5}
-                placeholder="What’s happening? Where are we? What do you want the kids to experience or learn?"
-                className="w-full rounded-2xl border border-neutral-300 bg-white px-4 py-3 text-sm outline-none transition focus:border-neutral-900 focus:ring-4 focus:ring-neutral-900/10"
-              />
-            </section>
-
-            <div className="flex justify-end">
-              <button
-                type="submit"
-                disabled={generating || !canGenerate}
-                className="rounded-2xl bg-neutral-900 px-5 py-3 text-sm font-medium text-white shadow-sm transition hover:bg-neutral-800 disabled:opacity-50"
-              >
-                {generating ? "Making magic..." : "Make the story real!"}
-              </button>
-            </div>
+            </fieldset>
           </form>
 
           {generateState.error ? <p className="mt-4 text-sm text-rose-700">{generateState.error}</p> : null}
+          {phase === "error" ? (
+            <div className="mt-4">
+              <button
+                type="button"
+                onClick={() => {
+                  reset();
+                  setCreatePanelCollapsed(false);
+                  setLoadingPanelCollapsed(false);
+                  setGenerateState((prev) => ({ ...prev, error: null }));
+                }}
+                className="rounded-2xl border border-neutral-300 bg-white px-4 py-2 text-sm font-medium text-neutral-900 hover:bg-neutral-100"
+              >
+                Try again
+              </button>
+            </div>
+          ) : null}
         </div>
+
+        {showProgressPanel ? (
+          <div className="rounded-3xl border border-neutral-200 bg-white p-6 shadow-sm">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h2 className="text-lg font-semibold tracking-tight text-neutral-900">
+                  Creating your story
+                </h2>
+                <p className="mt-1 text-sm text-neutral-600">
+                  {loadingPanelCollapsed
+                    ? `Progress: ${Math.floor(progress)}%`
+                    : "We are processing your story request now."}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setLoadingPanelCollapsed((prev) => !prev)}
+                className="rounded-xl border border-neutral-300 bg-white px-3 py-2 text-xs font-medium text-neutral-900 hover:bg-neutral-100"
+              >
+                {loadingPanelCollapsed ? "Expand details" : "Minimize"}
+              </button>
+            </div>
+
+            {loadingPanelCollapsed ? (
+              <div className="mt-4 h-2 w-full rounded-full bg-neutral-200">
+                <div
+                  className={`h-2 rounded-full transition-[width] duration-200 ${
+                    phase === "error" ? "bg-rose-500" : "bg-neutral-900"
+                  }`}
+                  style={{ width: `${Math.max(0, Math.min(100, progress)).toFixed(1)}%` }}
+                />
+              </div>
+            ) : (
+              <div className="mt-4">
+                <StoryGenerationProgress
+                  isRunning={generating}
+                  phase={phase}
+                  progress={progress}
+                  error={progressError}
+                />
+              </div>
+            )}
+          </div>
+        ) : null}
 
         {generateState.ok ? (
           <div className="rounded-3xl border border-neutral-200 bg-white p-6 shadow-sm space-y-4">
@@ -347,7 +485,7 @@ export default function CreateStoryWizard({ universeId, characterOptions }: Prop
                 {tone}
               </span>
               <span className="rounded-full bg-neutral-100 px-3 py-1 font-medium text-neutral-700">
-                {lengthChoice === "custom" ? `${customMinutes} min` : `${lengthChoice} min`}
+                {currentLengthLabel}
               </span>
               {generateState.wordCount > 0 ? (
                 <span className="rounded-full bg-neutral-100 px-3 py-1 font-medium text-neutral-700">
@@ -382,6 +520,7 @@ export default function CreateStoryWizard({ universeId, characterOptions }: Prop
               <input type="hidden" name="guidedEnding" value={guidedEnding} />
               <input type="hidden" name="stage" value={stage} />
               <input type="hidden" name="tone" value={tone} />
+              <input type="hidden" name="audienceAge" value={audienceAge} />
               <input type="hidden" name="lengthChoice" value={lengthChoice} />
               <input type="hidden" name="customMinutes" value={customMinutes} />
               <input type="hidden" name="selectedCharactersJson" value={selectedCharactersJson} />

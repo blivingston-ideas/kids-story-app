@@ -13,6 +13,7 @@ export const wizardInputSchema = z
     guidedMiddle: z.string().trim().max(400).optional().default(""),
     guidedEnding: z.string().trim().max(400).optional().default(""),
     stage: z.string().trim().max(800).optional().default(""),
+    audienceAge: z.string().trim().optional().default("6"),
     tone: z.enum(["calm", "silly", "adventurous"]),
     lengthChoice: z.enum(["5", "10", "20", "custom"]),
     customMinutes: z.string().trim().optional().default(""),
@@ -29,6 +30,15 @@ export const wizardInputSchema = z
           message: "Custom minutes must be between 1 and 60.",
         });
       }
+    }
+
+    const audienceAge = Number(data.audienceAge);
+    if (!Number.isFinite(audienceAge) || audienceAge < 1 || audienceAge > 17) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["audienceAge"],
+        message: "Audience age must be between 1 and 17.",
+      });
     }
   });
 

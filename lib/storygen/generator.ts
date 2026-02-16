@@ -111,12 +111,25 @@ function sceneCountForLength(lengthMinutes: number): number {
   return 12;
 }
 
-function readingLevelFromBible(storyBible: StoryBible): string {
-  const ages = storyBible.kids.map((k) => k.age).filter((a): a is number => typeof a === "number");
-  if (!ages.length) return "ages 4-7";
-  const youngest = Math.min(...ages);
-  if (youngest <= 4) return "ages 4-5";
-  if (youngest <= 7) return "ages 5-7";
+function averageAudienceAge(input: PipelineInput): number {
+  const kidAges = input.storyBible.kids
+    .map((k) => k.age)
+    .filter((a): a is number => typeof a === "number" && Number.isFinite(a));
+  const allAges = [input.audienceAge, ...kidAges];
+  const sum = allAges.reduce((acc, age) => acc + age, 0);
+  return sum / allAges.length;
+}
+
+function sentenceLimitForAge(age: number): number {
+  if (age <= 4) return 12;
+  if (age <= 6) return 16;
+  if (age <= 8) return 20;
+  return 24;
+}
+
+function readingLevelFromAverageAge(age: number): string {
+  if (age <= 4) return "ages 4-5";
+  if (age <= 7) return "ages 5-7";
   return "ages 6-8";
 }
 
@@ -301,11 +314,13 @@ function getCharacterSummary(storyBible: StoryBible): string {
 }
 
 function buildOutlinePrompt(input: PipelineInput, sceneCount: number): string {
+  const avgAge = averageAudienceAge(input);
   return [
     "Create a coherent children's story outline.",
     `Mode: ${input.surpriseVsGuided}`,
     `Tone: ${input.tone === "calm" ? "calm bedtime" : input.tone}`,
-    `Audience: ${readingLevelFromBible(input.storyBible)}`,
+    `Audience profile: user audience age ${input.audienceAge}, average age with selected kids ${avgAge.toFixed(1)}`,
+    `Audience reading level: ${readingLevelFromAverageAge(avgAge)}`,
     `Setting context: ${input.storyBible.universeName}`,
     `Optional author prompt: ${input.optionalPrompt || "none"}`,
     `Characters:\n${getCharacterSummary(input.storyBible)}`,
@@ -328,6 +343,8 @@ function buildDraftPrompt(
   minWords: number,
   maxWords: number
 ): string {
+  const avgAge = averageAudienceAge(input);
+  const sentenceLimit = sentenceLimitForAge(avgAge);
   const perSceneMax = Math.max(90, Math.floor(maxWords / outline.scenes.length));
   const toneText =
     input.tone === "calm"
@@ -340,7 +357,8 @@ function buildDraftPrompt(
     "Write the full story from this outline.",
     `Required word count: between ${minWords} and ${maxWords} words. Never fewer than ${minWords}.`,
     `Per scene max: about ${perSceneMax} words.`,
-    `Reading level: ${readingLevelFromBible(input.storyBible)}.`,
+    `Reading level: ${readingLevelFromAverageAge(avgAge)} (average age ${avgAge.toFixed(1)}).`,
+    `Sentence limit: keep most sentences at or below ${sentenceLimit} words.`,
     `Tone guidance: ${toneText}.`,
     "For EACH scene include:",
     "- one new event",

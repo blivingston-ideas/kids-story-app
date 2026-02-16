@@ -30,6 +30,7 @@ export const generateStoryInputSchema = z.object({
   universeId: z.string().uuid(),
   kidProfileIds: z.array(z.string().uuid()).default([]),
   adultProfileIds: z.array(z.string().uuid()).default([]),
+  audienceAge: z.number().int().min(1).max(17),
   tone: z.enum(["calm", "silly", "adventurous"]),
   lengthMinutes: z.number().int().min(1).max(30),
   surpriseVsGuided: z.enum(["surprise", "guided"]),

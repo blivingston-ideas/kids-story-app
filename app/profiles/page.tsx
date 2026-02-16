@@ -11,6 +11,15 @@ import { inviteCreateSchema } from "@/lib/validation/profiles";
 
 const idSchema = z.string().uuid("Invalid profile id");
 
+function initialsFromName(name: string): string {
+  const parts = name
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2);
+  return parts.map((part) => part[0]?.toUpperCase() ?? "").join("") || "?";
+}
+
 async function deleteKidProfile(formData: FormData) {
   "use server";
 
@@ -108,12 +117,14 @@ export default async function ProfilesPage() {
     await Promise.all([
       supabase
         .from("profiles_kid")
-        .select("id, display_name, age, themes, character_traits, created_at")
+        .select(
+          "id, display_name, age, themes, character_traits, books_we_like, avatar_url, created_at"
+        )
         .eq("universe_id", universe.id)
         .order("created_at", { ascending: false }),
       supabase
         .from("profiles_adult")
-        .select("id, display_name, persona_label, created_at")
+        .select("id, display_name, persona_label, avatar_url, created_at")
         .eq("universe_id", universe.id)
         .order("created_at", { ascending: false }),
     ]);
@@ -124,9 +135,9 @@ export default async function ProfilesPage() {
   const invitesResult = parent
     ? await supabase
         .from("invites")
-        .select("id, email, role, token, expires_at, accepted_at, created_at")
+        .select("id, email, role, token, expires_at, accepted_at")
         .eq("universe_id", universe.id)
-        .order("created_at", { ascending: false })
+        .order("expires_at", { ascending: false })
     : { data: null, error: null };
 
   if (invitesResult.error) throw new Error(invitesResult.error.message);
@@ -134,7 +145,7 @@ export default async function ProfilesPage() {
 
   return (
     <main className="min-h-screen bg-neutral-50">
-      <div className="mx-auto max-w-5xl px-6 py-10 space-y-6">
+      <div className="mx-auto max-w-6xl px-6 py-10 space-y-6">
         <div className="rounded-3xl border border-neutral-200 bg-white p-6 shadow-sm">
           <div className="flex items-center justify-between gap-3">
             <div>
@@ -156,23 +167,54 @@ export default async function ProfilesPage() {
 
         <section className="rounded-3xl border border-neutral-200 bg-white p-6 shadow-sm">
           <h2 className="text-lg font-semibold text-neutral-900">Kids</h2>
-          <div className="mt-4 space-y-3">
-            {kids.length === 0 ? (
-              <p className="text-sm text-neutral-600">No kid profiles yet.</p>
-            ) : (
-              kids.map((kid) => (
+          {kids.length === 0 ? (
+            <p className="mt-4 text-sm text-neutral-600">No kid profiles yet.</p>
+          ) : (
+            <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              {kids.map((kid) => (
                 <div
                   key={kid.id}
-                  className="rounded-2xl border border-neutral-200 bg-neutral-50 p-4 flex items-center justify-between gap-3"
+                  className="rounded-2xl border border-neutral-200 bg-neutral-50 p-4 flex flex-col gap-4"
                 >
-                  <div>
-                    <p className="font-medium text-neutral-900">{kid.display_name}</p>
-                    <p className="text-xs text-neutral-600 mt-1">
-                      Age: {kid.age ?? "n/a"} • Themes: {kid.themes?.slice(0, 3).join(", ") || "none"}
+                  <div className="flex items-center gap-3">
+                    {kid.avatar_url ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={kid.avatar_url}
+                        alt={`${kid.display_name} avatar`}
+                        className="h-12 w-12 rounded-xl border border-neutral-200 bg-white object-cover"
+                      />
+                    ) : (
+                      <div className="h-12 w-12 rounded-xl border border-neutral-200 bg-white grid place-items-center text-sm font-semibold text-neutral-700">
+                        {initialsFromName(kid.display_name)}
+                      </div>
+                    )}
+                    <div>
+                      <p className="font-medium text-neutral-900">{kid.display_name}</p>
+                      <p className="text-xs text-neutral-600">Kid profile</p>
+                    </div>
+                  </div>
+
+                  <div className="space-y-2 text-xs text-neutral-700">
+                    <p>
+                      <span className="font-medium text-neutral-900">Age:</span> {kid.age ?? "n/a"}
+                    </p>
+                    <p>
+                      <span className="font-medium text-neutral-900">Themes:</span>{" "}
+                      {kid.themes?.slice(0, 3).join(", ") || "none"}
+                    </p>
+                    <p>
+                      <span className="font-medium text-neutral-900">Traits:</span>{" "}
+                      {kid.character_traits?.slice(0, 3).join(", ") || "none"}
+                    </p>
+                    <p>
+                      <span className="font-medium text-neutral-900">Books:</span>{" "}
+                      {kid.books_we_like?.slice(0, 3).join(", ") || "none"}
                     </p>
                   </div>
+
                   {parent ? (
-                    <div className="flex items-center gap-2">
+                    <div className="mt-auto flex items-center gap-2">
                       <Link
                         href={`/profiles/kid/${kid.id}/edit`}
                         className="rounded-xl border border-neutral-300 bg-white px-3 py-2 text-xs font-medium text-neutral-900 hover:bg-neutral-100"
@@ -191,30 +233,50 @@ export default async function ProfilesPage() {
                     </div>
                   ) : null}
                 </div>
-              ))
-            )}
-          </div>
+              ))}
+            </div>
+          )}
         </section>
 
         <section className="rounded-3xl border border-neutral-200 bg-white p-6 shadow-sm">
           <h2 className="text-lg font-semibold text-neutral-900">Adults</h2>
-          <div className="mt-4 space-y-3">
-            {adults.length === 0 ? (
-              <p className="text-sm text-neutral-600">No adult profiles yet.</p>
-            ) : (
-              adults.map((adult) => (
+          {adults.length === 0 ? (
+            <p className="mt-4 text-sm text-neutral-600">No adult profiles yet.</p>
+          ) : (
+            <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              {adults.map((adult) => (
                 <div
                   key={adult.id}
-                  className="rounded-2xl border border-neutral-200 bg-neutral-50 p-4 flex items-center justify-between gap-3"
+                  className="rounded-2xl border border-neutral-200 bg-neutral-50 p-4 flex flex-col gap-4"
                 >
-                  <div>
-                    <p className="font-medium text-neutral-900">{adult.display_name}</p>
-                    <p className="text-xs text-neutral-600 mt-1">
-                      Role label: {adult.persona_label || "none"}
+                  <div className="flex items-center gap-3">
+                    {adult.avatar_url ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={adult.avatar_url}
+                        alt={`${adult.display_name} avatar`}
+                        className="h-12 w-12 rounded-xl border border-neutral-200 bg-white object-cover"
+                      />
+                    ) : (
+                      <div className="h-12 w-12 rounded-xl border border-neutral-200 bg-white grid place-items-center text-sm font-semibold text-neutral-700">
+                        {initialsFromName(adult.display_name)}
+                      </div>
+                    )}
+                    <div>
+                      <p className="font-medium text-neutral-900">{adult.display_name}</p>
+                      <p className="text-xs text-neutral-600">Adult profile</p>
+                    </div>
+                  </div>
+
+                  <div className="space-y-2 text-xs text-neutral-700">
+                    <p>
+                      <span className="font-medium text-neutral-900">Role label:</span>{" "}
+                      {adult.persona_label || "none"}
                     </p>
                   </div>
+
                   {parent ? (
-                    <div className="flex items-center gap-2">
+                    <div className="mt-auto flex items-center gap-2">
                       <Link
                         href={`/profiles/adult/${adult.id}/edit`}
                         className="rounded-xl border border-neutral-300 bg-white px-3 py-2 text-xs font-medium text-neutral-900 hover:bg-neutral-100"
@@ -233,9 +295,9 @@ export default async function ProfilesPage() {
                     </div>
                   ) : null}
                 </div>
-              ))
-            )}
-          </div>
+              ))}
+            </div>
+          )}
         </section>
 
         <section className="rounded-3xl border border-neutral-200 bg-white p-6 shadow-sm">
@@ -282,7 +344,7 @@ export default async function ProfilesPage() {
                         className="rounded-2xl border border-neutral-200 bg-neutral-50 p-4"
                       >
                         <p className="text-sm font-medium text-neutral-900">
-                          {invite.email} • {invite.role}
+                          {invite.email} | {invite.role}
                         </p>
                         <p className="mt-1 text-xs text-neutral-600">Status: {status}</p>
                         <p className="mt-1 text-xs text-neutral-600">

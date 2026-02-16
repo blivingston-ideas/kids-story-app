@@ -68,6 +68,8 @@ type StorySpec = {
   targetWordMax: number;
   paragraphGuidance: string;
   readingLevel: "ages 2-4" | "ages 5-7" | "ages 8+";
+  sentenceWordLimit: 12 | 16 | 20 | 24;
+  averageAudienceAge: number;
   stage: string;
   guided: {
     beginning: string;
@@ -100,13 +102,24 @@ function hashString(s: string): number {
   return h;
 }
 
-function readingLevelFromYoungestAge(ages: Array<number | null>): "ages 2-4" | "ages 5-7" | "ages 8+" {
-  const concreteAges = ages.filter((a): a is number => typeof a === "number" && Number.isFinite(a));
-  if (concreteAges.length === 0) return "ages 5-7";
-  const youngest = Math.min(...concreteAges);
-  if (youngest <= 4) return "ages 2-4";
-  if (youngest <= 7) return "ages 5-7";
+function averageAudienceAge(inputAudienceAge: number, kidAges: Array<number | null>): number {
+  const concreteAges = kidAges.filter((a): a is number => typeof a === "number" && Number.isFinite(a));
+  const allAges = [inputAudienceAge, ...concreteAges];
+  const total = allAges.reduce((sum, age) => sum + age, 0);
+  return total / allAges.length;
+}
+
+function readingLevelFromAverageAge(age: number): "ages 2-4" | "ages 5-7" | "ages 8+" {
+  if (age <= 4) return "ages 2-4";
+  if (age <= 7) return "ages 5-7";
   return "ages 8+";
+}
+
+function sentenceWordLimitForAge(age: number): 12 | 16 | 20 | 24 {
+  if (age <= 4) return 12;
+  if (age <= 6) return 16;
+  if (age <= 8) return 20;
+  return 24;
 }
 
 function stripCodeFences(raw: string): string {
@@ -182,6 +195,7 @@ function parseWizardInput(formData: FormData): WizardInput {
     guidedMiddle: String(formData.get("guidedMiddle") ?? ""),
     guidedEnding: String(formData.get("guidedEnding") ?? ""),
     stage: String(formData.get("stage") ?? ""),
+    audienceAge: String(formData.get("audienceAge") ?? "6"),
     tone: String(formData.get("tone") ?? ""),
     lengthChoice: String(formData.get("lengthChoice") ?? ""),
     customMinutes: String(formData.get("customMinutes") ?? ""),
@@ -266,6 +280,8 @@ async function buildStorySpec(input: WizardInput, universeId: string): Promise<S
   const lengthMinutes = parseLengthMinutes(input);
   const targetWords = getWordTargets(lengthMinutes);
   const kidAges = (kids ?? []).map((k) => (typeof k.age === "number" ? k.age : null));
+  const audienceAgeValue = Number(input.audienceAge);
+  const avgAudienceAge = averageAudienceAge(audienceAgeValue, kidAges);
 
   return {
     mode: input.mode,
@@ -275,7 +291,9 @@ async function buildStorySpec(input: WizardInput, universeId: string): Promise<S
     targetWordMin: targetWords.min,
     targetWordMax: targetWords.max,
     paragraphGuidance: getParagraphGuidance(lengthMinutes),
-    readingLevel: readingLevelFromYoungestAge(kidAges),
+    readingLevel: readingLevelFromAverageAge(avgAudienceAge),
+    sentenceWordLimit: sentenceWordLimitForAge(avgAudienceAge),
+    averageAudienceAge: avgAudienceAge,
     stage: input.stage,
     guided:
       input.mode === "guided"
@@ -318,7 +336,8 @@ function promptForSpec(spec: StorySpec): string {
     "- Hard rule: Do NOT write fewer than the minimum words.",
     `- Paragraph guidance: ${spec.paragraphGuidance}`,
     "- Format rule: narrative prose only, no bullet lists.",
-    `- Reading level: ${spec.readingLevel}`,
+    `- Reading level: ${spec.readingLevel} (average audience age ${spec.averageAudienceAge.toFixed(1)})`,
+    `- Sentence limit: keep most sentences at or below ${spec.sentenceWordLimit} words.`,
     `- Stage context: ${spec.stage || "Family bedtime story in Story Universe"}`,
     `- Hidden spark for novelty: ${spec.spark}`,
     `- Gentle lesson hint (optional): ${spec.lessonHint}`,
@@ -653,6 +672,7 @@ export async function saveStoryAction(formData: FormData): Promise<void> {
         : null,
     tone: input.tone,
     length_minutes: lengthMinutes,
+    audience_age: Number(input.audienceAge),
     stage: input.stage || null,
     selected_characters: selectedCharacters,
     custom_character_name: input.customCharacterName || null,
