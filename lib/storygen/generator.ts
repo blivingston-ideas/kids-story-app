@@ -1,6 +1,11 @@
 ﻿import { countWords, getWordTargets } from "@/lib/story/length";
 import { llm } from "@/lib/llm/client";
-import { outlineSchema, type GenerateStoryInput, type Outline } from "@/lib/storygen/schemas";
+import {
+  outlineSchema,
+  type GenerateStoryInput,
+  type Outline,
+  type StorySpark,
+} from "@/lib/storygen/schemas";
 
 type KidProfile = {
   id: string;
@@ -43,14 +48,69 @@ export type RepetitionReport = {
   hasProblem: boolean;
 };
 
-const OUTLINE_REPAIR_WARNING = "Outline JSON was repaired after parse/validation failure.";
-
 type OutlineRepairFn = (params: {
   invalidText: string;
   reason: string;
 }) => Promise<string>;
 
 const END_MARKER = "<END>";
+
+const sparkArcRules: Record<StorySpark, string[]> = {
+  adventure: [
+    "Clear external goal.",
+    "Escalating obstacles.",
+    "Physical or environmental challenges.",
+    "Strong triumphant ending.",
+  ],
+  mystery: [
+    "Introduce a puzzle or strange event.",
+    "At least one false assumption.",
+    "Clue-based progression.",
+    "Clear reveal.",
+  ],
+  brave: [
+    "Internal fear or challenge.",
+    "Self-doubt moment.",
+    "One key turning point.",
+    "Emotional growth resolution.",
+  ],
+  friendship: [
+    "Relationship tension or misunderstanding.",
+    "Honest communication or action.",
+    "Restored bond.",
+  ],
+  silly: [
+    "Increasing absurdity.",
+    "Escalation pattern using rule of 3.",
+    "Clever resolution.",
+  ],
+  discovery: [
+    "Curiosity-driven exploration.",
+    "Learning moment.",
+    "Awe-based ending.",
+  ],
+  helper: [
+    "Someone in need.",
+    "Attempts that do not fully work.",
+    "Creative problem solving.",
+    "Gratitude resolution.",
+  ],
+  magic: [
+    "Introduce a magical element with a clear rule.",
+    "Show a consequence of magic.",
+    "Emotional integration in the ending.",
+  ],
+};
+
+function sparkLabel(spark: StorySpark): string {
+  return spark.charAt(0).toUpperCase() + spark.slice(1);
+}
+
+function toneFromSpark(spark: StorySpark): "calm bedtime" | "silly" | "adventurous" {
+  if (spark === "silly") return "silly";
+  if (spark === "friendship" || spark === "helper" || spark === "discovery") return "calm bedtime";
+  return "adventurous";
+}
 
 function normalizeWord(w: string): string {
   return w.toLowerCase().replace(/[^a-z0-9']/g, "");
@@ -295,7 +355,8 @@ export async function parseOutlineStrict(
     repairUsed = true;
   }
 
-  if (repairUsed) warnings.push(OUTLINE_REPAIR_WARNING);
+  // Successful auto-repair is treated as an internal resilience step, not a user-facing warning.
+  void repairUsed;
 
   return { outline: validated.data, warnings };
 }
@@ -315,19 +376,26 @@ function getCharacterSummary(storyBible: StoryBible): string {
 
 function buildOutlinePrompt(input: PipelineInput, sceneCount: number): string {
   const avgAge = averageAudienceAge(input);
+  const sparkRules = sparkArcRules[input.storySpark].map((rule) => `- ${rule}`).join("\n");
+  const derivedTone = toneFromSpark(input.storySpark);
   return [
     "Create a coherent children's story outline.",
+    "You must structure the story according to the selected Story Spark arc.",
     `Mode: ${input.surpriseVsGuided}`,
-    `Tone: ${input.tone === "calm" ? "calm bedtime" : input.tone}`,
+    `Story Spark: ${sparkLabel(input.storySpark)}`,
+    `Tone: ${derivedTone}`,
     `Audience profile: user audience age ${input.audienceAge}, average age with selected kids ${avgAge.toFixed(1)}`,
     `Audience reading level: ${readingLevelFromAverageAge(avgAge)}`,
     `Setting context: ${input.storyBible.universeName}`,
     `Optional author prompt: ${input.optionalPrompt || "none"}`,
     `Characters:\n${getCharacterSummary(input.storyBible)}`,
+    "Story Spark arc requirements:",
+    sparkRules,
     `Create exactly ${sceneCount} scenes.`,
     "Each scene must include one genuinely new event and one new sensory detail.",
     "conflict_turn MUST NOT be empty.",
     "If a scene has no conflict, write a gentle micro-conflict (example: 'A small challenge arises, so they pause and solve it together.').",
+    "Ensure beats and scene progression explicitly reflect the selected Story Spark arc; reject generic arcs.",
     "Output ONLY JSON. No markdown fences. No commentary.",
     "All keys must be double-quoted. No trailing commas. No comments.",
     "JSON must match the schema exactly.",
@@ -335,6 +403,74 @@ function buildOutlinePrompt(input: PipelineInput, sceneCount: number): string {
     "title, target_audience_age, tone, characters, setting, scenes, ending_payoff, theme",
     "Scene keys: scene_id, scene_goal, new_event, new_detail, conflict_turn, mini_payoff",
   ].join("\n");
+}
+
+function outlineJsonSchema(sceneCount: number): Record<string, unknown> {
+  return {
+    type: "object",
+    additionalProperties: false,
+    required: [
+      "title",
+      "target_audience_age",
+      "tone",
+      "characters",
+      "setting",
+      "scenes",
+      "ending_payoff",
+      "theme",
+    ],
+    properties: {
+      title: { type: "string", minLength: 1 },
+      target_audience_age: { type: "string", minLength: 1 },
+      tone: { type: "string", enum: ["calm bedtime", "silly", "adventurous"] },
+      characters: {
+        type: "array",
+        minItems: 1,
+        items: {
+          type: "object",
+          additionalProperties: false,
+          required: ["name", "traits", "relationship"],
+          properties: {
+            name: { type: "string", minLength: 1 },
+            traits: {
+              type: "array",
+              minItems: 1,
+              items: { type: "string", minLength: 1 },
+            },
+            relationship: { type: "string", minLength: 1 },
+          },
+        },
+      },
+      setting: { type: "string", minLength: 1 },
+      scenes: {
+        type: "array",
+        minItems: sceneCount,
+        maxItems: sceneCount,
+        items: {
+          type: "object",
+          additionalProperties: false,
+          required: [
+            "scene_id",
+            "scene_goal",
+            "new_event",
+            "new_detail",
+            "conflict_turn",
+            "mini_payoff",
+          ],
+          properties: {
+            scene_id: { type: "string", minLength: 1 },
+            scene_goal: { type: "string", minLength: 1 },
+            new_event: { type: "string", minLength: 1 },
+            new_detail: { type: "string", minLength: 1 },
+            conflict_turn: { type: "string", minLength: 1 },
+            mini_payoff: { type: "string", minLength: 1 },
+          },
+        },
+      },
+      ending_payoff: { type: "string", minLength: 1 },
+      theme: { type: "string", minLength: 1 },
+    },
+  };
 }
 
 function buildDraftPrompt(
@@ -346,12 +482,14 @@ function buildDraftPrompt(
   const avgAge = averageAudienceAge(input);
   const sentenceLimit = sentenceLimitForAge(avgAge);
   const perSceneMax = Math.max(90, Math.floor(maxWords / outline.scenes.length));
+  const derivedTone = toneFromSpark(input.storySpark);
   const toneText =
-    input.tone === "calm"
+    derivedTone === "calm bedtime"
       ? "calm bedtime: soothing, safe, gentle emotional arc"
-      : input.tone === "silly"
+      : derivedTone === "silly"
         ? "silly: playful, funny, kind"
         : "adventurous: exciting but kid-safe and not scary";
+  const sparkRules = sparkArcRules[input.storySpark].map((rule) => `- ${rule}`).join("\n");
 
   return [
     "Write the full story from this outline.",
@@ -359,6 +497,9 @@ function buildDraftPrompt(
     `Per scene max: about ${perSceneMax} words.`,
     `Reading level: ${readingLevelFromAverageAge(avgAge)} (average age ${avgAge.toFixed(1)}).`,
     `Sentence limit: keep most sentences at or below ${sentenceLimit} words.`,
+    `Story Spark: ${sparkLabel(input.storySpark)}.`,
+    "Story Spark arc requirements to enforce:",
+    sparkRules,
     `Tone guidance: ${toneText}.`,
     "For EACH scene include:",
     "- one new event",
@@ -374,6 +515,37 @@ function buildDraftPrompt(
   ].join("\n");
 }
 
+function buildSparkSelfCheckPrompt(input: PipelineInput, draft: string): string {
+  const sparkRules = sparkArcRules[input.storySpark].map((rule) => `- ${rule}`).join("\n");
+  return [
+    "Evaluate this draft for Story Spark alignment.",
+    `Selected Story Spark: ${sparkLabel(input.storySpark)}.`,
+    "Story Spark required elements:",
+    sparkRules,
+    "If the draft does not clearly match the Spark arc, revise it so it does.",
+    "Keep tone, characters, and plot coherence intact.",
+    "Return JSON only with keys:",
+    '- "matches_spark" (boolean)',
+    '- "revised_story" (string)',
+    "If it already matches, return revised_story as the original draft text.",
+    "Draft story:",
+    draft,
+  ].join("\n");
+}
+
+function parseSparkSelfCheck(raw: string): { matchesSpark: boolean; revisedStory: string } {
+  const parsed = parseJsonFromText(raw) as { matches_spark?: unknown; revised_story?: unknown };
+  const matchesSpark = parsed.matches_spark === true;
+  const revisedStory =
+    typeof parsed.revised_story === "string" && parsed.revised_story.trim().length > 0
+      ? parsed.revised_story.trim()
+      : "";
+  if (!revisedStory) {
+    throw new Error("Missing revised_story from Spark self-check.");
+  }
+  return { matchesSpark, revisedStory };
+}
+
 function buildRewritePrompt(
   input: PipelineInput,
   outline: Outline,
@@ -385,7 +557,8 @@ function buildRewritePrompt(
   return [
     "You are editing a children's story for quality.",
     `Target words: ${minWords}-${maxWords}.`,
-    `Tone: ${input.tone}.`,
+    `Story Spark: ${sparkLabel(input.storySpark)}.`,
+    `Tone: ${toneFromSpark(input.storySpark)}.`,
     "Step 1: write a brief critique (4-8 bullet points) focusing on repetition, pacing, distinct scenes, and emotional payoff.",
     "Step 2: rewrite the story to fix those issues.",
     "Rewrite rules:",
@@ -439,7 +612,7 @@ function fallbackOutline(input: PipelineInput, sceneCount: number): Outline {
   return {
     title: "The Lantern Trail in Story Universe",
     target_audience_age: "ages 4-7",
-    tone: input.tone === "calm" ? "calm bedtime" : input.tone,
+    tone: toneFromSpark(input.storySpark),
     characters,
     setting: input.storyBible.universeName,
     scenes,
@@ -496,13 +669,21 @@ export async function generateStory(input: PipelineInput): Promise<GenerateStory
   try {
     outlineRaw = await llm.generate({
       system:
-        "You are an expert children's story architect. Output strictly valid JSON only, no markdown.",
+        "You are an expert children's story architect. You must structure the story according to the selected Story Spark arc. Output strictly valid JSON only, no markdown.",
       messages: [{ role: "user", content: buildOutlinePrompt(input, sceneCount) }],
       model: "gpt-4.1-mini",
       temperature: 0.8,
       presence_penalty: 0.7,
       frequency_penalty: 0.7,
       max_tokens: 2200,
+      response_format: {
+        type: "json_schema",
+        json_schema: {
+          name: "story_outline",
+          strict: true,
+          schema: outlineJsonSchema(sceneCount),
+        },
+      },
     });
     const parsedOutline = await parseOutlineStrict(outlineRaw);
     outline = parsedOutline.outline;
@@ -514,7 +695,7 @@ export async function generateStory(input: PipelineInput): Promise<GenerateStory
     try {
       const regeneratedOutlineRaw = await llm.generate({
         system:
-          "You are an expert children's story architect. Output strictly valid JSON only, no markdown.",
+          "You are an expert children's story architect. You must structure the story according to the selected Story Spark arc. Output strictly valid JSON only, no markdown.",
         messages: [
           {
             role: "user",
@@ -561,6 +742,31 @@ export async function generateStory(input: PipelineInput): Promise<GenerateStory
   } catch (error) {
     warnings.push(`Draft fallback used: ${error instanceof Error ? error.message : "unknown error"}`);
     draft = fallbackDraft(outline, targets.min);
+  }
+
+  try {
+    const sparkCheckRaw = await llm.generate({
+      system:
+        "You are a strict story-structure evaluator. Check Spark arc fit and revise if needed. Return JSON only.",
+      messages: [
+        {
+          role: "user",
+          content: buildSparkSelfCheckPrompt(input, draft),
+        },
+      ],
+      model: "gpt-4.1-mini",
+      temperature: 0.4,
+      presence_penalty: 0.2,
+      frequency_penalty: 0.2,
+      max_tokens: 6500,
+    });
+    const sparkCheck = parseSparkSelfCheck(sparkCheckRaw);
+    draft = sparkCheck.revisedStory;
+    if (!sparkCheck.matchesSpark) {
+      warnings.push("Draft was revised to better match the selected Story Spark arc.");
+    }
+  } catch (error) {
+    warnings.push(`Spark self-check skipped: ${error instanceof Error ? error.message : "unknown error"}`);
   }
 
   let revised = draft;

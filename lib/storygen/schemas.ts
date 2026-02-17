@@ -1,5 +1,16 @@
 import { z } from "zod";
 
+export const storySparkSchema = z.enum([
+  "adventure",
+  "mystery",
+  "brave",
+  "friendship",
+  "silly",
+  "discovery",
+  "helper",
+  "magic",
+]);
+
 export const outlineCharacterSchema = z.object({
   name: z.string().trim().min(1),
   traits: z.array(z.string().trim().min(1)).min(1),
@@ -31,7 +42,7 @@ export const generateStoryInputSchema = z.object({
   kidProfileIds: z.array(z.string().uuid()).default([]),
   adultProfileIds: z.array(z.string().uuid()).default([]),
   audienceAge: z.number().int().min(1).max(17),
-  tone: z.enum(["calm", "silly", "adventurous"]),
+  storySpark: storySparkSchema,
   lengthMinutes: z.number().int().min(1).max(30),
   surpriseVsGuided: z.enum(["surprise", "guided"]),
   optionalPrompt: z.string().trim().max(2000).optional().default(""),
@@ -39,3 +50,4 @@ export const generateStoryInputSchema = z.object({
 
 export type Outline = z.infer<typeof outlineSchema>;
 export type GenerateStoryInput = z.infer<typeof generateStoryInputSchema>;
+export type StorySpark = z.infer<typeof storySparkSchema>;

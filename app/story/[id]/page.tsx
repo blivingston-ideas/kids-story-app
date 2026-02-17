@@ -6,6 +6,9 @@ import { z } from "zod";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { getCurrentUniverseContext } from "@/lib/data/auth-context";
 import { createShareAction, revokeShareAction } from "@/app/story/[id]/actions";
+import StoryBookViewer from "@/components/story-book-viewer";
+import { getIllustrationPublicUrl } from "@/lib/story/illustrations";
+import { buildStoryPageTexts } from "@/lib/story/pages";
 
 const paramsSchema = z.object({
   id: z.string().uuid("Invalid story id"),
@@ -15,6 +18,14 @@ type StoryCharacterRow = {
   character_type: "kid" | "adult" | "custom";
   character_id: string | null;
   custom_name: string | null;
+};
+
+type StoryPageRow = {
+  page_index: number;
+  text: string;
+  image_status: "not_started" | "generating" | "ready" | "failed";
+  image_path: string | null;
+  image_error: string | null;
 };
 
 export default async function StoryReaderPage({
@@ -56,6 +67,32 @@ export default async function StoryReaderPage({
 
   if (charactersError) throw new Error(charactersError.message);
 
+  let { data: storyPages } = await supabase
+    .from("story_pages")
+    .select("page_index, text, image_status, image_path, image_error")
+    .eq("story_id", story.id)
+    .order("page_index", { ascending: true });
+
+  if ((storyPages ?? []).length === 0) {
+    const generatedPages = buildStoryPageTexts(story.content, story.length_minutes).map((p) => ({
+      story_id: story.id,
+      page_index: p.pageIndex,
+      text: p.text,
+      image_status: "not_started" as const,
+    }));
+    if (generatedPages.length > 0) {
+      const { error: createPagesError } = await supabase.from("story_pages").insert(generatedPages);
+      if (createPagesError) throw new Error(createPagesError.message);
+      const refreshed = await supabase
+        .from("story_pages")
+        .select("page_index, text, image_status, image_path, image_error")
+        .eq("story_id", story.id)
+        .order("page_index", { ascending: true });
+      if (refreshed.error) throw new Error(refreshed.error.message);
+      storyPages = refreshed.data;
+    }
+  }
+
   const rows = (characters ?? []) as StoryCharacterRow[];
   const kidIds = rows.filter((r) => r.character_type === "kid" && r.character_id).map((r) => r.character_id as string);
   const adultIds = rows
@@ -86,9 +123,17 @@ export default async function StoryReaderPage({
   const shareUrl =
     share && !share.revoked_at ? `/s/${share.share_token}` : null;
 
+  const viewerPages = ((storyPages ?? []) as StoryPageRow[]).map((p) => ({
+    pageIndex: p.page_index,
+    text: p.text,
+    imageStatus: p.image_status,
+    imageUrl: p.image_path ? getIllustrationPublicUrl(p.image_path) : null,
+    imageError: p.image_error,
+  }));
+
   return (
     <main className="min-h-screen bg-neutral-50">
-      <div className="mx-auto max-w-3xl px-6 py-10 space-y-6">
+      <div className="mx-auto w-full max-w-7xl px-4 sm:px-6 py-10 space-y-6">
         <div className="rounded-3xl border border-neutral-200 bg-white p-6 shadow-sm">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
@@ -115,9 +160,16 @@ export default async function StoryReaderPage({
             </p>
           </div>
 
-          <article className="prose prose-neutral mt-6 max-w-none whitespace-pre-wrap leading-8 text-neutral-800">
-            {story.content}
-          </article>
+          <div className="mt-6">
+            <StoryBookViewer
+              title={story.title}
+              content={story.content}
+              lengthMinutes={story.length_minutes}
+              storyId={story.id}
+              canManageIllustrations
+              storyPages={viewerPages}
+            />
+          </div>
         </div>
 
         <div className="rounded-3xl border border-neutral-200 bg-white p-6 shadow-sm">

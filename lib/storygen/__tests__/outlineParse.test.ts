@@ -47,7 +47,7 @@ test("parseOutlineStrict repairs broken outline JSON", async () => {
 
   assert.equal(result.outline.title, "The Night Compass");
   assert.equal(result.outline.scenes.length, 6);
-  assert.ok(result.warnings.includes("Outline JSON was repaired after parse/validation failure."));
+  assert.equal(result.warnings.length, 0);
 });
 
 test("parseOutlineStrict repairs schema-invalid outline with empty conflict_turn", async () => {
@@ -176,5 +176,5 @@ test("parseOutlineStrict repairs schema-invalid outline with empty conflict_turn
   });
 
   assert.equal(result.outline.scenes[0]?.conflict_turn.length > 0, true);
-  assert.ok(result.warnings.includes("Outline JSON was repaired after parse/validation failure."));
+  assert.equal(result.warnings.length, 0);
 });

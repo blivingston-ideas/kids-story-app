@@ -1,4 +1,3 @@
-﻿// app/profiles/new/page.tsx
 export const dynamic = "force-dynamic";
 
 import Link from "next/link";
@@ -8,9 +7,27 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { getCurrentUniverseContext } from "@/lib/data/auth-context";
 import { assertParent, isParent } from "@/lib/data/roles";
 import { adultProfileSchema, kidProfileSchema, parseCsvList } from "@/lib/validation/profiles";
+import ProfileCreateForm from "@/app/profiles/new/profile-create-form";
 
-type ProfileType = "kid" | "adult";
+type ProfileType = "kid" | "adult" | "grandparent" | "aunt_uncle" | "cousin";
 type UniverseRef = { name: string } | { name: string }[] | null;
+
+function profileTypeLabel(profileType: Exclude<ProfileType, "kid">): string {
+  if (profileType === "adult") return "Adult";
+  if (profileType === "grandparent") return "Grandparent";
+  if (profileType === "aunt_uncle") return "Aunt/Uncle";
+  return "Cousin";
+}
+
+async function toDataUrl(file: File): Promise<string> {
+  const maxBytes = 1_000_000;
+  if (file.size > maxBytes) {
+    throw new Error("Profile photo must be 1MB or smaller.");
+  }
+  const bytes = Buffer.from(await file.arrayBuffer()).toString("base64");
+  const mime = file.type || "image/png";
+  return `data:${mime};base64,${bytes}`;
+}
 
 async function createProfile(formData: FormData) {
   "use server";
@@ -20,20 +37,30 @@ async function createProfile(formData: FormData) {
 
   if (!user) redirect("/login");
   if (!membership) redirect("/onboarding/create");
-
   assertParent(membership);
 
   const universeId = membership.universe_id;
   const profileType = String(formData.get("profile_type") ?? "kid") as ProfileType;
 
+  const avatarCandidate = formData.get("avatar_file");
+  let avatarUrl = "";
+  if (avatarCandidate instanceof File && avatarCandidate.size > 0) {
+    avatarUrl = await toDataUrl(avatarCandidate);
+  }
+
+  const themesValue = String(formData.get("themes") ?? "");
+  const booksValue = String(formData.get("books_we_like") ?? "");
+  const traitsValue = String(formData.get("character_traits") ?? "");
+  const catchPhrasesValue = String(formData.get("catch_phrases") ?? "");
+
   if (profileType === "kid") {
     const parsed = kidProfileSchema.safeParse({
       name: String(formData.get("name") ?? ""),
       age: String(formData.get("age") ?? ""),
-      themes: String(formData.get("themes") ?? ""),
-      books_we_like: String(formData.get("books_we_like") ?? ""),
-      character_traits: String(formData.get("character_traits") ?? ""),
-      avatar_url: String(formData.get("avatar_url") ?? ""),
+      themes: themesValue,
+      books_we_like: booksValue,
+      character_traits: [traitsValue, catchPhrasesValue].filter(Boolean).join(", "),
+      avatar_url: avatarUrl,
     });
 
     if (!parsed.success) {
@@ -54,12 +81,12 @@ async function createProfile(formData: FormData) {
   } else {
     const parsed = adultProfileSchema.safeParse({
       name: String(formData.get("name") ?? ""),
-      persona_label: String(formData.get("role_label") ?? ""),
-      avatar_url: String(formData.get("avatar_url") ?? ""),
+      persona_label: profileTypeLabel(profileType),
+      avatar_url: avatarUrl,
     });
 
     if (!parsed.success) {
-      throw new Error(parsed.error.issues[0]?.message ?? "Invalid adult profile data");
+      throw new Error(parsed.error.issues[0]?.message ?? "Invalid profile data");
     }
 
     const { error } = await supabase.from("profiles_adult").insert({
@@ -99,144 +126,42 @@ export default async function NewProfilePage() {
   const universeName = Array.isArray(u) ? u?.[0]?.name : u?.name;
 
   return (
-    <main className="min-h-screen bg-neutral-50">
+    <main className="min-h-screen bg-app-bg text-anchor">
       <div className="mx-auto max-w-2xl px-6 py-10">
-        <header className="mb-8">
-          <div className="flex items-start justify-between gap-4">
-            <div>
-              <h1 className="text-2xl font-semibold tracking-tight">Create a profile</h1>
-              <p className="mt-2 text-sm text-neutral-600">
-                Add kids and adults so stories can include the right characters,
-                vibes, and details.
-              </p>
-              {universeName ? (
-                <p className="mt-2 text-xs text-neutral-500">
-                  Universe:{" "}
-                  <span className="font-medium text-neutral-800">{universeName}</span>
-                </p>
-              ) : null}
-            </div>
-
-            <Link
-              href="/profiles"
-              className="rounded-2xl border border-neutral-300 bg-white px-4 py-2 text-sm font-medium text-neutral-900 shadow-sm hover:bg-neutral-50"
-            >
-              Back
-            </Link>
-          </div>
-        </header>
-
-        <div className="rounded-3xl border border-neutral-200 bg-white shadow-sm">
-          <div className="border-b border-neutral-200 p-6">
-            <div className="text-sm font-semibold text-neutral-900">Profile details</div>
-            <div className="mt-1 text-sm text-neutral-600">Start simple. You can edit these later.</div>
-          </div>
-
-          <form action={createProfile} className="p-6 space-y-6">
-            <div className="space-y-2">
-              <div className="text-sm font-medium text-neutral-900">Profile type</div>
-              <div className="grid grid-cols-2 gap-3">
-                <label className="group flex cursor-pointer items-center justify-between rounded-2xl border border-neutral-300 bg-white px-4 py-3 text-sm hover:bg-neutral-50">
-                  <span className="font-medium">Kid</span>
-                  <input type="radio" name="profile_type" value="kid" defaultChecked className="h-4 w-4" />
-                </label>
-                <label className="group flex cursor-pointer items-center justify-between rounded-2xl border border-neutral-300 bg-white px-4 py-3 text-sm hover:bg-neutral-50">
-                  <span className="font-medium">Adult</span>
-                  <input type="radio" name="profile_type" value="adult" className="h-4 w-4" />
-                </label>
-              </div>
-            </div>
-
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div className="space-y-2">
-                <label htmlFor="name" className="text-sm font-medium">Name</label>
-                <input
-                  id="name"
-                  name="name"
-                  placeholder="e.g. William"
-                  className="w-full rounded-2xl border border-neutral-300 px-4 py-3 text-sm outline-none transition focus:border-neutral-900 focus:ring-4 focus:ring-neutral-900/10"
-                  required
-                />
-              </div>
-
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Age (kid) or Role label (adult)</label>
-                <div className="grid grid-cols-2 gap-3">
-                  <input
-                    name="age"
-                    inputMode="numeric"
-                    placeholder="Age"
-                    className="w-full rounded-2xl border border-neutral-300 px-4 py-3 text-sm outline-none transition focus:border-neutral-900 focus:ring-4 focus:ring-neutral-900/10"
-                  />
-                  <input
-                    name="role_label"
-                    placeholder='Role label (e.g. "Inventor")'
-                    className="w-full rounded-2xl border border-neutral-300 px-4 py-3 text-sm outline-none transition focus:border-neutral-900 focus:ring-4 focus:ring-neutral-900/10"
-                  />
-                </div>
-                <p className="text-xs text-neutral-500">Fill whichever applies; the other will be ignored.</p>
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              <label htmlFor="themes" className="text-sm font-medium">Themes (comma-separated)</label>
-              <input
-                id="themes"
-                name="themes"
-                placeholder="e.g. dinosaurs, space, friendship"
-                className="w-full rounded-2xl border border-neutral-300 px-4 py-3 text-sm outline-none transition focus:border-neutral-900 focus:ring-4 focus:ring-neutral-900/10"
-              />
-            </div>
-
-            <div className="space-y-2">
-              <label htmlFor="books_we_like" className="text-sm font-medium">Books we like (comma-separated)</label>
-              <input
-                id="books_we_like"
-                name="books_we_like"
-                placeholder="e.g. The Last Firehawk, Pete the Cat"
-                className="w-full rounded-2xl border border-neutral-300 px-4 py-3 text-sm outline-none transition focus:border-neutral-900 focus:ring-4 focus:ring-neutral-900/10"
-              />
-            </div>
-
-            <div className="space-y-2">
-              <label htmlFor="character_traits" className="text-sm font-medium">Character traits (comma-separated)</label>
-              <input
-                id="character_traits"
-                name="character_traits"
-                placeholder="e.g. brave, curious, funny"
-                className="w-full rounded-2xl border border-neutral-300 px-4 py-3 text-sm outline-none transition focus:border-neutral-900 focus:ring-4 focus:ring-neutral-900/10"
-              />
-            </div>
-
-            <div className="space-y-2">
-              <label htmlFor="avatar_url" className="text-sm font-medium">Avatar URL (optional)</label>
-              <input
-                id="avatar_url"
-                name="avatar_url"
-                placeholder="https://example.com/avatar.png"
-                className="w-full rounded-2xl border border-neutral-300 px-4 py-3 text-sm outline-none transition focus:border-neutral-900 focus:ring-4 focus:ring-neutral-900/10"
-              />
-            </div>
-
-            <div className="flex flex-col gap-3 sm:flex-row sm:justify-end">
-              <Link
-                href="/profiles"
-                className="rounded-2xl border border-neutral-300 bg-white px-4 py-3 text-center text-sm font-medium text-neutral-900 shadow-sm hover:bg-neutral-50"
-              >
-                Cancel
-              </Link>
-              <button
-                type="submit"
-                className="rounded-2xl bg-neutral-900 px-5 py-3 text-sm font-medium text-white shadow-sm hover:bg-neutral-800 focus:outline-none focus:ring-4 focus:ring-neutral-900/20"
-              >
-                Create profile
-              </button>
-            </div>
-          </form>
+        <div className="mb-4">
+          <Link
+            href="/profiles"
+            className="inline-flex rounded-xl border border-soft-accent bg-white px-4 py-2 text-sm font-medium text-anchor hover:bg-soft-accent"
+          >
+            Back
+          </Link>
         </div>
 
-        <footer className="mt-6 text-xs text-neutral-500">
-          Signed in as <span className="font-medium text-neutral-800">{user.email}</span>
+        <header className="mb-8">
+          <h1 className="text-2xl font-semibold tracking-tight text-anchor">Create a profile</h1>
+          <p className="mt-2 text-sm text-anchor/75">
+            Add family profiles so stories can include the right characters and details.
+          </p>
+          {universeName ? (
+            <p className="mt-2 text-xs text-anchor/65">
+              Universe: <span className="font-medium text-anchor">{universeName}</span>
+            </p>
+          ) : null}
+        </header>
+
+        <div className="card-surface overflow-hidden">
+          <div className="border-b border-soft-accent p-6">
+            <div className="text-sm font-semibold text-anchor">Profile details</div>
+            <div className="mt-1 text-sm text-anchor/75">
+              Tell us about yourself! You can change/edit/add later.
+            </div>
+          </div>
+
+          <ProfileCreateForm action={createProfile} />
+        </div>
+
+        <footer className="mt-6 text-xs text-anchor/65">
+          Signed in as <span className="font-medium text-anchor">{user.email}</span>
         </footer>
       </div>
     </main>

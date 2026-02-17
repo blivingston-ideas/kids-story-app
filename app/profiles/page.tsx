@@ -147,26 +147,38 @@ export default async function ProfilesPage() {
     <main className="min-h-screen bg-neutral-50">
       <div className="mx-auto max-w-6xl px-6 py-10 space-y-6">
         <div className="rounded-3xl border border-neutral-200 bg-white p-6 shadow-sm">
-          <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
             <div>
-              <h1 className="text-2xl font-semibold tracking-tight">Profiles</h1>
-              <p className="mt-1 text-sm text-neutral-600">
+              <div className="flex items-center gap-3">
+                <h1 className="text-2xl font-semibold tracking-tight">Profiles</h1>
+                {parent ? (
+                  <Link
+                    href="/profiles/new"
+                    className="rounded-2xl bg-neutral-900 px-4 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-neutral-800"
+                  >
+                    Add profile
+                  </Link>
+                ) : null}
+              </div>
+              <p className="mt-2 text-sm text-neutral-600">
                 Universe: <span className="font-medium text-neutral-900">{universe.name}</span>
               </p>
             </div>
-            {parent ? (
-              <Link
-                href="/profiles/new"
-                className="rounded-2xl bg-neutral-900 px-4 py-3 text-sm font-medium text-white shadow-sm transition hover:bg-neutral-800"
-              >
-                Add profile
-              </Link>
-            ) : null}
           </div>
         </div>
 
         <section className="rounded-3xl border border-neutral-200 bg-white p-6 shadow-sm">
-          <h2 className="text-lg font-semibold text-neutral-900">Kids</h2>
+          <div className="flex items-center justify-between gap-3">
+            <h2 className="text-lg font-semibold text-neutral-900">Kids</h2>
+            {parent ? (
+              <Link
+                href="/profiles/new?type=kid"
+                className="rounded-xl border border-neutral-300 bg-white px-3 py-2 text-xs font-medium text-neutral-900 hover:bg-neutral-100"
+              >
+                Add
+              </Link>
+            ) : null}
+          </div>
           {kids.length === 0 ? (
             <p className="mt-4 text-sm text-neutral-600">No kid profiles yet.</p>
           ) : (
@@ -239,7 +251,17 @@ export default async function ProfilesPage() {
         </section>
 
         <section className="rounded-3xl border border-neutral-200 bg-white p-6 shadow-sm">
-          <h2 className="text-lg font-semibold text-neutral-900">Adults</h2>
+          <div className="flex items-center justify-between gap-3">
+            <h2 className="text-lg font-semibold text-neutral-900">Adults</h2>
+            {parent ? (
+              <Link
+                href="/profiles/new?type=adult"
+                className="rounded-xl border border-neutral-300 bg-white px-3 py-2 text-xs font-medium text-neutral-900 hover:bg-neutral-100"
+              >
+                Add
+              </Link>
+            ) : null}
+          </div>
           {adults.length === 0 ? (
             <p className="mt-4 text-sm text-neutral-600">No adult profiles yet.</p>
           ) : (

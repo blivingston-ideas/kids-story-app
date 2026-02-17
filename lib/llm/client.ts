@@ -6,6 +6,16 @@ export type LlmGenerateInput = {
   presence_penalty?: number;
   frequency_penalty?: number;
   max_tokens?: number;
+  response_format?:
+    | { type: "text" }
+    | {
+        type: "json_schema";
+        json_schema: {
+          name: string;
+          strict?: boolean;
+          schema: Record<string, unknown>;
+        };
+      };
 };
 
 export type LlmClient = {
@@ -32,6 +42,7 @@ export const llm: LlmClient = {
         frequency_penalty: input.frequency_penalty ?? 0.7,
         max_tokens: input.max_tokens,
         messages: [{ role: "system", content: input.system }, ...input.messages],
+        response_format: input.response_format,
       }),
     });
 

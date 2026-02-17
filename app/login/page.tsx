@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { supabaseBrowser } from "@/lib/supabase/browser";
+import Button from "@/components/button";
 
 export default function LoginPage() {
   const [email, setEmail] = useState("");
@@ -18,60 +19,110 @@ export default function LoginPage() {
     const supabase = supabaseBrowser();
 
     if (mode === "signup") {
-      const { error } = await supabase.auth.signUp({ email, password });
-      if (error) setError(error.message);
+      const { error: signUpError } = await supabase.auth.signUp({ email, password });
+      if (signUpError) setError(signUpError.message);
       else setMsg("Account created. Now switch to Sign in.");
       return;
     }
 
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
-    if (error) setError(error.message);
+    const { error: signInError } = await supabase.auth.signInWithPassword({ email, password });
+    if (signInError) setError(signInError.message);
     else window.location.href = "/gate";
   }
 
   return (
-    <main style={{ padding: 24, maxWidth: 420 }}>
-      <h1>{mode === "signin" ? "Sign in" : "Create account"}</h1>
+    <main className="min-h-screen bg-app-bg px-6 py-10 text-anchor">
+      <div className="mx-auto flex min-h-[80vh] w-full max-w-md items-center">
+        <div className="card-surface w-full p-8">
+          <p className="inline-flex rounded-full bg-soft-accent px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] text-anchor">
+            Story Universe
+          </p>
+          <h1 className="mt-4 text-3xl font-semibold tracking-tight text-anchor">
+            {mode === "signin" ? "Sign in" : "Create account"}
+          </h1>
+          <p className="mt-2 text-sm text-anchor/75">Continue your family adventures.</p>
 
-      <form onSubmit={onSubmit}>
-        <label htmlFor="email">Email</label>
-        <input
-          id="email"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          placeholder="you@email.com"
-          style={{ display: "block", width: "100%", margin: "8px 0", padding: 10 }}
-        />
+          <div className="mt-5 flex gap-2">
+            <Button
+              type="button"
+              variant={mode === "signin" ? "primary" : "ghost"}
+              onClick={() => setMode("signin")}
+            >
+              Sign in
+            </Button>
+            <Button
+              type="button"
+              variant={mode === "signup" ? "secondary" : "ghost"}
+              onClick={() => setMode("signup")}
+            >
+              Create account
+            </Button>
+          </div>
 
-        <label htmlFor="pw">Password</label>
-        <input
-          id="pw"
-          type="password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          placeholder="••••••••"
-          style={{ display: "block", width: "100%", margin: "8px 0", padding: 10 }}
-        />
+          <form onSubmit={onSubmit} className="mt-6 space-y-4">
+            <div className="space-y-2">
+              <label htmlFor="email" className="text-sm font-medium text-anchor">
+                Email
+              </label>
+              <input
+                id="email"
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="you@email.com"
+                className="w-full rounded-xl border border-soft-accent bg-white px-4 py-3 text-sm text-anchor outline-none transition focus:border-secondary focus:ring-4 focus:ring-soft-accent/70"
+                required
+              />
+            </div>
 
-        <button type="submit">
-          {mode === "signin" ? "Sign in" : "Create account"}
-        </button>
+            <div className="space-y-2">
+              <label htmlFor="pw" className="text-sm font-medium text-anchor">
+                Password
+              </label>
+              <input
+                id="pw"
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="Enter your password"
+                className="w-full rounded-xl border border-soft-accent bg-white px-4 py-3 text-sm text-anchor outline-none transition focus:border-secondary focus:ring-4 focus:ring-soft-accent/70"
+                required
+              />
+            </div>
 
-        <div style={{ marginTop: 12 }}>
-          {mode === "signin" ? (
-            <button type="button" onClick={() => setMode("signup")}>
-              Need an account? Sign up
-            </button>
-          ) : (
-            <button type="button" onClick={() => setMode("signin")}>
-              Already have an account? Sign in
-            </button>
-          )}
+            <Button type="submit" variant="primary" className="w-full py-3">
+              {mode === "signin" ? "Sign in" : "Create account"}
+            </Button>
+
+            {mode === "signin" ? (
+              <p className="text-sm text-anchor/75">
+                Need an account?{" "}
+                <button
+                  type="button"
+                  onClick={() => setMode("signup")}
+                  className="font-medium text-secondary hover:text-secondary-hover"
+                >
+                  Sign up
+                </button>
+              </p>
+            ) : (
+              <p className="text-sm text-anchor/75">
+                Already have an account?{" "}
+                <button
+                  type="button"
+                  onClick={() => setMode("signin")}
+                  className="font-medium text-secondary hover:text-secondary-hover"
+                >
+                  Sign in
+                </button>
+              </p>
+            )}
+
+            {msg ? <p className="text-sm text-secondary">{msg}</p> : null}
+            {error ? <p className="text-sm text-rose-700">{error}</p> : null}
+          </form>
         </div>
-
-        {msg && <p style={{ color: "green" }}>{msg}</p>}
-        {error && <p style={{ color: "crimson" }}>{error}</p>}
-      </form>
+      </div>
     </main>
   );
 }

@@ -2,12 +2,16 @@ export const dynamic = "force-dynamic";
 
 import { notFound } from "next/navigation";
 import { z } from "zod";
-import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+import StoryBookViewer from "@/components/story-book-viewer";
+import { getIllustrationPublicUrl } from "@/lib/story/illustrations";
 
 const tokenSchema = z.string().trim().min(12).max(200);
 const storySchema = z.object({
+  id: z.string().uuid(),
   title: z.string(),
   content: z.string(),
+  length_minutes: z.number().int().min(1).max(120).nullable().optional(),
 });
 const shareSchema = z.object({
   share_token: z.string(),
@@ -24,11 +28,11 @@ export default async function PublicStoryPage({
   const parsed = tokenSchema.safeParse(resolved.token);
   if (!parsed.success) notFound();
 
-  const supabase = await createSupabaseServerClient();
+  const supabase = createSupabaseAdminClient();
 
   const { data, error } = await supabase
     .from("story_shares")
-    .select("share_token, revoked_at, stories(title, content)")
+    .select("share_token, revoked_at, stories(id, title, content, length_minutes)")
     .eq("share_token", parsed.data)
     .maybeSingle();
 
@@ -43,16 +47,30 @@ export default async function PublicStoryPage({
   const story = Array.isArray(share.stories) ? share.stories[0] : share.stories;
   if (!story) notFound();
 
+  const { data: storyPages } = await supabase
+    .from("story_pages")
+    .select("page_index, text, image_status, image_path, image_error")
+    .eq("story_id", story.id)
+    .order("page_index", { ascending: true });
+
+  const viewerPages = (storyPages ?? []).map((p) => ({
+    pageIndex: p.page_index,
+    text: p.text,
+    imageStatus: p.image_status as "not_started" | "generating" | "ready" | "failed",
+    imageUrl: p.image_path ? getIllustrationPublicUrl(p.image_path) : null,
+    imageError: p.image_error,
+  }));
+
   return (
-    <main className="min-h-screen bg-neutral-50">
-      <div className="mx-auto max-w-3xl px-6 py-10">
-        <div className="rounded-3xl border border-neutral-200 bg-white p-8 shadow-sm">
-          <h1 className="text-3xl font-semibold tracking-tight text-neutral-900">
-            {story.title}
-          </h1>
-          <article className="mt-6 whitespace-pre-wrap leading-8 text-neutral-800">
-            {story.content}
-          </article>
+    <main className="min-h-screen bg-app-bg">
+      <div className="mx-auto w-full max-w-7xl px-4 sm:px-6 py-10">
+        <div className="card-surface p-8">
+          <StoryBookViewer
+            title={story.title}
+            content={story.content}
+            lengthMinutes={story.length_minutes ?? 10}
+            storyPages={viewerPages}
+          />
         </div>
       </div>
     </main>

@@ -61,10 +61,10 @@ function statusGlyph(status: TaskStatus): string {
 }
 
 function statusClass(status: TaskStatus): string {
-  if (status === "done") return "text-emerald-700";
-  if (status === "running") return "text-neutral-900";
+  if (status === "done") return "text-secondary";
+  if (status === "running") return "text-anchor";
   if (status === "failed") return "text-rose-700";
-  return "text-neutral-500";
+  return "text-anchor/60";
 }
 
 export default function StoryGenerationProgress({
@@ -76,21 +76,21 @@ export default function StoryGenerationProgress({
   const currentIndex = getCurrentTaskIndex(phase, progress);
 
   return (
-    <section className="rounded-3xl border border-neutral-200 bg-white p-5 shadow-sm">
-      <p className="text-sm font-medium text-neutral-900">
+    <section className="card-surface border border-soft-accent p-5">
+      <p className="text-sm font-medium text-anchor">
         {phase === "error" ? "Something went wrong while creating your story." : "Creating your story..."}
       </p>
 
-      <div className="mt-3 h-3 w-full rounded-full bg-neutral-200">
+      <div className="mt-3 h-3 w-full rounded-full bg-soft-accent">
         <div
           className={`h-3 rounded-full transition-[width] duration-200 ${
-            phase === "error" ? "bg-rose-500" : "bg-neutral-900"
+            phase === "error" ? "bg-rose-500" : "bg-primary"
           }`}
           style={{ width: `${Math.max(0, Math.min(100, progress)).toFixed(1)}%` }}
         />
       </div>
 
-      <p className="mt-2 text-xs text-neutral-600">
+      <p className="mt-2 text-xs text-anchor/75">
         {isRunning ? `${Math.floor(progress)}% complete` : phase === "done" ? "100% complete" : `${Math.floor(progress)}%`}
       </p>
 

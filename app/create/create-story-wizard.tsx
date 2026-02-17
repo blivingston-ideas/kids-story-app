@@ -4,12 +4,51 @@ import { useMemo, useState } from "react";
 import { saveStoryAction } from "@/app/create/actions";
 import StoryGenerationProgress from "@/components/StoryGenerationProgress";
 import { useStoryGenerationProgress } from "@/hooks/useStoryGenerationProgress";
+import Button from "@/components/button";
+import StoryBookViewer from "@/components/story-book-viewer";
 
 type CharacterOption = {
   id: string;
   type: "kid" | "adult";
   label: string;
+  avatarUrl: string | null;
 };
+
+type StorySpark =
+  | "adventure"
+  | "mystery"
+  | "brave"
+  | "friendship"
+  | "silly"
+  | "discovery"
+  | "helper"
+  | "magic";
+
+const sparkCards: Array<{ id: StorySpark; name: string; description: string }> = [
+  { id: "adventure", name: "Adventure", description: "A bold quest with rising obstacles and a triumphant finish." },
+  { id: "mystery", name: "Mystery", description: "A curious puzzle with clues, a wrong turn, and a reveal." },
+  { id: "brave", name: "Brave", description: "A fear faced with heart, growth, and a proud turning point." },
+  { id: "friendship", name: "Friendship", description: "A bond tested, honest repair, and a stronger connection." },
+  { id: "silly", name: "Silly", description: "Playful chaos that escalates in funny rule-of-three beats." },
+  { id: "discovery", name: "Discovery", description: "Curious exploring, learning, and an awe-filled ending." },
+  { id: "helper", name: "Helper", description: "Someone needs help, creative tries, and grateful resolution." },
+  { id: "magic", name: "Magic", description: "A magical rule, a consequence, and emotional integration." },
+];
+
+function toneForSpark(spark: StorySpark): "calm" | "silly" | "adventurous" {
+  if (spark === "silly") return "silly";
+  if (spark === "friendship" || spark === "helper" || spark === "discovery") return "calm";
+  return "adventurous";
+}
+
+function initialsFromName(name: string): string {
+  const parts = name
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2);
+  return parts.map((part) => part[0]?.toUpperCase() ?? "").join("") || "?";
+}
 
 type Props = {
   universeId: string;
@@ -30,16 +69,18 @@ type GenerateState = {
 };
 
 export default function CreateStoryWizard({ universeId, characterOptions }: Props) {
-  const [mode, setMode] = useState<"surprise" | "guided">("surprise");
-  const [guidedBeginning, setGuidedBeginning] = useState("");
-  const [guidedMiddle, setGuidedMiddle] = useState("");
-  const [guidedEnding, setGuidedEnding] = useState("");
-  const [tone, setTone] = useState<"calm" | "silly" | "adventurous">("calm");
+  const mode: "surprise" | "guided" = "surprise";
+  const guidedBeginning = "";
+  const guidedMiddle = "";
+  const guidedEnding = "";
+  const [storySpark, setStorySpark] = useState<StorySpark>("adventure");
   const [lengthChoice, setLengthChoice] = useState<"5" | "10" | "20" | "custom">("10");
   const [customMinutes, setCustomMinutes] = useState("15");
   const [customCharacterName, setCustomCharacterName] = useState("");
   const [audienceAge, setAudienceAge] = useState("6");
   const [stage, setStage] = useState("");
+  const [stageIdeaLoading, setStageIdeaLoading] = useState(false);
+  const [stageIdeaError, setStageIdeaError] = useState<string | null>(null);
   const [selectedCharacterKeys, setSelectedCharacterKeys] = useState<string[]>([]);
   const [generating, setGenerating] = useState(false);
   const [createPanelCollapsed, setCreatePanelCollapsed] = useState(false);
@@ -69,11 +110,14 @@ export default function CreateStoryWizard({ universeId, characterOptions }: Prop
   );
 
   const selectedCharactersJson = JSON.stringify(selectedCharacters);
+  const derivedTone = toneForSpark(storySpark);
+  const hasSelectedKid = selectedCharacters.some((c) => c.type === "kid");
 
   function toggleCharacter(key: string) {
-    setSelectedCharacterKeys((prev) =>
-      prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]
-    );
+    const next = selectedCharacterKeys.includes(key)
+      ? selectedCharacterKeys.filter((k) => k !== key)
+      : [...selectedCharacterKeys, key];
+    setSelectedCharacterKeys(next);
   }
 
   function getLengthMinutes(): number {
@@ -115,7 +159,7 @@ export default function CreateStoryWizard({ universeId, characterOptions }: Prop
           universeId,
           kidProfileIds,
           adultProfileIds,
-          tone,
+          storySpark,
           lengthMinutes: getLengthMinutes(),
           surpriseVsGuided: mode,
           audienceAge: Number(audienceAge),
@@ -148,7 +192,7 @@ export default function CreateStoryWizard({ universeId, characterOptions }: Prop
         generatedContent: payload.storyText,
         generatedBlurb: "A fresh story generated from your universe context.",
         readingTimeEstimate: getLengthMinutes(),
-        spark: "",
+        spark: storySpark,
         warnings: payload.warnings ?? [],
         wordCount: payload.wordCount ?? 0,
         sceneCount: payload.sceneCount ?? 0,
@@ -160,6 +204,29 @@ export default function CreateStoryWizard({ universeId, characterOptions }: Prop
       setGenerateState((prev) => ({ ...prev, ok: false, error: message }));
     } finally {
       setGenerating(false);
+    }
+  }
+
+  async function handleSurpriseStageIdea(): Promise<void> {
+    if (stageIdeaLoading || generating) return;
+    setStageIdeaError(null);
+    setStageIdeaLoading(true);
+    try {
+      const response = await fetch("/api/stories/stage-blurb", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ storySpark }),
+      });
+      const payload = (await response.json()) as { ok?: boolean; blurb?: string; error?: string };
+      if (!response.ok || !payload.ok || !payload.blurb) {
+        throw new Error(payload.error ?? "Could not generate a stage idea.");
+      }
+      setStage(payload.blurb.trim());
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Could not generate a stage idea.";
+      setStageIdeaError(message);
+    } finally {
+      setStageIdeaLoading(false);
     }
   }
 
@@ -178,39 +245,37 @@ export default function CreateStoryWizard({ universeId, characterOptions }: Prop
   const currentLengthLabel = lengthChoice === "custom" ? `${customMinutes} min` : `${lengthChoice} min`;
 
   return (
-    <main className="min-h-screen bg-neutral-50">
+    <main className="min-h-screen bg-app-bg text-anchor">
       <div className="mx-auto max-w-4xl px-6 py-10 space-y-6">
-        <div className="rounded-3xl border border-neutral-200 bg-white p-6 shadow-sm">
+        <div className="card-surface p-6">
           <div className="flex items-start justify-between gap-3">
             <div>
-              <h1 className="text-2xl font-semibold tracking-tight">Create Story</h1>
-              <p className="mt-2 text-sm text-neutral-600">
+              <h1 className="text-2xl font-semibold tracking-tight text-anchor">Create Story</h1>
+              <p className="mt-2 text-sm text-anchor/75">
                 {createPanelCollapsed
                   ? "Create form is minimized. Expand to see your inputs."
                   : "Shape your story, then make it real."}
               </p>
             </div>
-            <button
+            <Button
               type="button"
               onClick={() => setCreatePanelCollapsed((prev) => !prev)}
-              className="rounded-xl border border-neutral-300 bg-white px-3 py-2 text-xs font-medium text-neutral-900 hover:bg-neutral-100"
+              variant="ghost"
+              className="px-3 py-2 text-xs"
             >
               {createPanelCollapsed ? "Expand details" : "Minimize"}
-            </button>
+            </Button>
           </div>
 
           {createPanelCollapsed ? (
             <div className="mt-4 flex flex-wrap gap-2 text-xs">
-              <span className="rounded-full bg-neutral-100 px-3 py-1 font-medium text-neutral-700 capitalize">
-                {mode}
+              <span className="rounded-full bg-soft-accent px-3 py-1 font-medium text-anchor capitalize">
+                {storySpark}
               </span>
-              <span className="rounded-full bg-neutral-100 px-3 py-1 font-medium text-neutral-700 capitalize">
-                {tone}
-              </span>
-              <span className="rounded-full bg-neutral-100 px-3 py-1 font-medium text-neutral-700">
+              <span className="rounded-full bg-soft-accent px-3 py-1 font-medium text-anchor">
                 {currentLengthLabel}
               </span>
-              <span className="rounded-full bg-neutral-100 px-3 py-1 font-medium text-neutral-700">
+              <span className="rounded-full bg-soft-accent px-3 py-1 font-medium text-anchor">
                 Audience age {audienceAge}
               </span>
             </div>
@@ -221,119 +286,126 @@ export default function CreateStoryWizard({ universeId, characterOptions }: Prop
             className={`mt-6 space-y-5 ${createPanelCollapsed ? "hidden" : ""}`}
           >
             <fieldset disabled={generating} className="space-y-5 disabled:opacity-75">
-              <section className="rounded-2xl border border-neutral-200 bg-neutral-50 p-4 space-y-3">
-                <h2 className="text-sm font-semibold uppercase tracking-wide text-neutral-700">1. Mode</h2>
+              <section className="rounded-2xl border border-soft-accent bg-white p-4 space-y-3 shadow-sm">
+                <h2 className="text-sm font-semibold uppercase tracking-wide text-anchor/80">1. Story Spark</h2>
                 <div className="grid gap-3 sm:grid-cols-2">
-                  <button
-                    type="button"
-                    onClick={() => setMode("surprise")}
-                    className={`rounded-2xl border px-4 py-3 text-left text-sm ${
-                      mode === "surprise"
-                        ? "border-neutral-900 bg-neutral-900 text-white"
-                        : "border-neutral-300 bg-white text-neutral-900"
-                    }`}
-                  >
-                    Surprise
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setMode("guided")}
-                    className={`rounded-2xl border px-4 py-3 text-left text-sm ${
-                      mode === "guided"
-                        ? "border-neutral-900 bg-neutral-900 text-white"
-                        : "border-neutral-300 bg-white text-neutral-900"
-                    }`}
-                  >
-                    Guided
-                  </button>
+                  {sparkCards.map((spark) => (
+                    <button
+                      key={spark.id}
+                      type="button"
+                      onClick={() => setStorySpark(spark.id)}
+                      className={`rounded-2xl border px-4 py-3 text-left ${
+                        storySpark === spark.id
+                          ? "border-primary bg-primary text-white"
+                          : "border-soft-accent bg-white text-anchor"
+                      }`}
+                    >
+                      <p className="text-sm font-semibold">{spark.name}</p>
+                      <p
+                        className={`mt-1 text-xs ${
+                          storySpark === spark.id ? "text-white/85" : "text-anchor/70"
+                        }`}
+                      >
+                        {spark.description}
+                      </p>
+                    </button>
+                  ))}
                 </div>
-                {mode === "guided" ? (
-                  <div className="grid gap-3">
-                    <input
-                      value={guidedBeginning}
-                      onChange={(e) => setGuidedBeginning(e.target.value)}
-                      placeholder="Beginning beat (optional)"
-                      className="w-full rounded-2xl border border-neutral-300 px-4 py-3 text-sm"
-                    />
-                    <input
-                      value={guidedMiddle}
-                      onChange={(e) => setGuidedMiddle(e.target.value)}
-                      placeholder="Middle beat (optional)"
-                      className="w-full rounded-2xl border border-neutral-300 px-4 py-3 text-sm"
-                    />
-                    <input
-                      value={guidedEnding}
-                      onChange={(e) => setGuidedEnding(e.target.value)}
-                      placeholder="End beat (optional)"
-                      className="w-full rounded-2xl border border-neutral-300 px-4 py-3 text-sm"
-                    />
-                  </div>
-                ) : null}
               </section>
 
-              <section className="rounded-2xl border border-neutral-200 bg-neutral-50 p-4 space-y-3">
-                <h2 className="text-sm font-semibold uppercase tracking-wide text-neutral-700">2. Characters</h2>
-                <div className="grid gap-3 sm:grid-cols-2">
+              <section className="rounded-2xl border border-soft-accent bg-white p-4 space-y-3 shadow-sm">
+                <h2 className="text-sm font-semibold uppercase tracking-wide text-anchor/80">2. Characters</h2>
+                <div className="grid gap-3 grid-cols-2 sm:grid-cols-3 lg:grid-cols-4">
                   {characterOptions.map((character) => {
                     const key = `${character.type}:${character.id}`;
                     const checked = selectedCharacterKeys.includes(key);
                     return (
-                      <label
+                      <button
                         key={key}
-                        className="flex items-center justify-between rounded-2xl border border-neutral-300 bg-white px-4 py-3 text-sm"
+                        type="button"
+                        onClick={() => toggleCharacter(key)}
+                        className={`group relative overflow-hidden rounded-2xl border text-left transition ${
+                          checked
+                            ? "border-secondary ring-2 ring-secondary/35"
+                            : "border-soft-accent hover:border-secondary/70"
+                        }`}
+                        aria-pressed={checked}
                       >
-                        <span>
-                          {character.label} <span className="text-neutral-500">({character.type})</span>
+                        <div className="aspect-square w-full bg-soft-accent/40">
+                          {character.avatarUrl ? (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img
+                              src={character.avatarUrl}
+                              alt={character.label}
+                              className="h-full w-full object-cover"
+                            />
+                          ) : (
+                            <div className="flex h-full w-full items-center justify-center bg-soft-accent text-2xl font-semibold text-anchor/70">
+                              {initialsFromName(character.label)}
+                            </div>
+                          )}
+                        </div>
+                        <span className="pointer-events-none absolute right-2 top-2 inline-flex h-6 w-6 items-center justify-center rounded-full bg-white/95 text-sm shadow-sm ring-1 ring-soft-accent">
+                          {checked ? "X" : "O"}
                         </span>
-                        <input
-                          type="checkbox"
-                          checked={checked}
-                          onChange={() => toggleCharacter(key)}
-                          className="h-4 w-4"
-                        />
-                      </label>
+                        <div className="border-t border-soft-accent bg-white px-3 py-2">
+                          <p className="truncate text-xs font-semibold text-anchor">{character.label}</p>
+                          <p className="text-[11px] text-anchor/65 capitalize">{character.type}</p>
+                        </div>
+                      </button>
                     );
                   })}
                 </div>
-                <input
-                  value={customCharacterName}
-                  onChange={(e) => setCustomCharacterName(e.target.value)}
-                  placeholder="Optional custom character name"
-                  className="w-full rounded-2xl border border-neutral-300 bg-white px-4 py-3 text-sm"
-                />
+                <div className="space-y-2">
+                  <label htmlFor="custom-character" className="text-xs font-medium text-anchor/75">
+                    Optional character
+                  </label>
+                  <input
+                    id="custom-character"
+                    value={customCharacterName}
+                    onChange={(e) => setCustomCharacterName(e.target.value)}
+                    placeholder="Optional custom character name"
+                    className="w-full rounded-2xl border border-soft-accent bg-white px-4 py-3 text-sm"
+                  />
+                </div>
                 <div className="flex flex-wrap gap-2">
                   {selectedCharacters.map((c) => (
                     <span
                       key={`${c.type}:${c.id}`}
-                      className="rounded-full bg-neutral-900 px-3 py-1 text-xs font-medium text-white"
+                      className="rounded-full bg-secondary px-3 py-1 text-xs font-medium text-white"
                     >
                       {c.label}
                     </span>
                   ))}
                   {customCharacterName.trim() ? (
-                    <span className="rounded-full bg-neutral-200 px-3 py-1 text-xs font-medium text-neutral-800">
+                    <span className="rounded-full bg-soft-accent px-3 py-1 text-xs font-medium text-anchor">
                       {customCharacterName.trim()} (custom)
                     </span>
                   ) : null}
                 </div>
+
+                {!hasSelectedKid ? (
+                  <div className="space-y-2 rounded-2xl border border-soft-accent bg-soft-accent/25 p-3">
+                    <label htmlFor="audience-age" className="text-xs font-medium text-anchor/75">
+                      Audience age
+                    </label>
+                    <input
+                      id="audience-age"
+                      value={audienceAge}
+                      onChange={(e) => setAudienceAge(e.target.value)}
+                      inputMode="numeric"
+                      placeholder="Age (e.g. 6)"
+                      className="w-full rounded-2xl border border-soft-accent bg-white px-4 py-3 text-sm"
+                    />
+                    <p className="text-xs text-anchor/70">
+                      Add a kid profile to auto-drive reading level from kid ages.
+                    </p>
+                  </div>
+                ) : null}
               </section>
 
-              <section className="rounded-2xl border border-neutral-200 bg-neutral-50 p-4 space-y-3">
-                <h2 className="text-sm font-semibold uppercase tracking-wide text-neutral-700">3. Audience age</h2>
-                <input
-                  value={audienceAge}
-                  onChange={(e) => setAudienceAge(e.target.value)}
-                  inputMode="numeric"
-                  placeholder="Age (e.g. 6)"
-                  className="w-full rounded-2xl border border-neutral-300 bg-white px-4 py-3 text-sm"
-                />
-                <p className="text-xs text-neutral-600">
-                  We combine this with selected kids&apos; ages to tune sentence length for reading level.
-                </p>
-              </section>
-
-              <section className="rounded-2xl border border-neutral-200 bg-neutral-50 p-4 space-y-3">
-                <h2 className="text-sm font-semibold uppercase tracking-wide text-neutral-700">4. Length</h2>
+              <section className="rounded-2xl border border-soft-accent bg-white p-4 space-y-3 shadow-sm">
+                <h2 className="text-sm font-semibold uppercase tracking-wide text-anchor/80">3. Length</h2>
                 <div className="grid gap-3 sm:grid-cols-4">
                   {(["5", "10", "20", "custom"] as const).map((choice) => (
                     <button
@@ -342,8 +414,8 @@ export default function CreateStoryWizard({ universeId, characterOptions }: Prop
                       onClick={() => setLengthChoice(choice)}
                       className={`rounded-2xl border px-4 py-3 text-sm ${
                         lengthChoice === choice
-                          ? "border-neutral-900 bg-neutral-900 text-white"
-                          : "border-neutral-300 bg-white text-neutral-900"
+                          ? "border-primary bg-primary text-white"
+                          : "border-soft-accent bg-white text-anchor"
                       }`}
                     >
                       {choice === "custom" ? "Custom" : `${choice} min`}
@@ -356,54 +428,43 @@ export default function CreateStoryWizard({ universeId, characterOptions }: Prop
                     onChange={(e) => setCustomMinutes(e.target.value)}
                     inputMode="numeric"
                     placeholder="Custom minutes (1-60)"
-                    className="w-full rounded-2xl border border-neutral-300 bg-white px-4 py-3 text-sm"
+                    className="w-full rounded-2xl border border-soft-accent bg-white px-4 py-3 text-sm"
                   />
                 ) : null}
               </section>
 
-              <section className="rounded-2xl border border-neutral-200 bg-neutral-50 p-4 space-y-3">
-                <h2 className="text-sm font-semibold uppercase tracking-wide text-neutral-700">5. Tone</h2>
-                <div className="grid gap-3 sm:grid-cols-3">
-                  {([
-                    { id: "calm", label: "Calm bedtime" },
-                    { id: "silly", label: "Silly" },
-                    { id: "adventurous", label: "Adventurous" },
-                  ] as const).map((t) => (
-                    <button
-                      key={t.id}
-                      type="button"
-                      onClick={() => setTone(t.id)}
-                      className={`rounded-2xl border px-4 py-3 text-sm ${
-                        tone === t.id
-                          ? "border-neutral-900 bg-neutral-900 text-white"
-                          : "border-neutral-300 bg-white text-neutral-900"
-                      }`}
-                    >
-                      {t.label}
-                    </button>
-                  ))}
+              <section className="rounded-2xl border border-soft-accent bg-white p-4 space-y-3 shadow-sm">
+                <div className="flex items-center justify-between gap-3">
+                  <h2 className="text-sm font-semibold uppercase tracking-wide text-anchor/80">4. Set the stage</h2>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    className="px-3 py-2 text-xs"
+                    onClick={handleSurpriseStageIdea}
+                    disabled={stageIdeaLoading || generating}
+                  >
+                    {stageIdeaLoading ? "Thinking..." : "Surprise me!"}
+                  </Button>
                 </div>
-              </section>
-
-              <section className="rounded-2xl border border-neutral-200 bg-neutral-50 p-4 space-y-3">
-                <h2 className="text-sm font-semibold uppercase tracking-wide text-neutral-700">6. Set the stage</h2>
                 <textarea
                   value={stage}
                   onChange={(e) => setStage(e.target.value)}
                   rows={5}
                   placeholder="What's happening? Where are we? What do you want the kids to experience or learn?"
-                  className="w-full rounded-2xl border border-neutral-300 bg-white px-4 py-3 text-sm outline-none transition focus:border-neutral-900 focus:ring-4 focus:ring-neutral-900/10"
+                  className="w-full rounded-2xl border border-soft-accent bg-white px-4 py-3 text-sm outline-none transition focus:border-secondary focus:ring-4 focus:ring-soft-accent/70"
                 />
+                {stageIdeaError ? <p className="text-xs text-rose-700">{stageIdeaError}</p> : null}
               </section>
 
               <div className="flex justify-end">
-                <button
+                <Button
                   type="submit"
                   disabled={generating || !canGenerate}
-                  className="rounded-2xl bg-neutral-900 px-5 py-3 text-sm font-medium text-white shadow-sm transition hover:bg-neutral-800 disabled:opacity-50"
+                  variant="primary"
+                  className="rounded-2xl px-5 py-3 disabled:opacity-50"
                 >
                   {generating ? "Creating your story..." : "Make the story real!"}
-                </button>
+                </Button>
               </div>
             </fieldset>
           </form>
@@ -411,7 +472,7 @@ export default function CreateStoryWizard({ universeId, characterOptions }: Prop
           {generateState.error ? <p className="mt-4 text-sm text-rose-700">{generateState.error}</p> : null}
           {phase === "error" ? (
             <div className="mt-4">
-              <button
+              <Button
                 type="button"
                 onClick={() => {
                   reset();
@@ -419,41 +480,43 @@ export default function CreateStoryWizard({ universeId, characterOptions }: Prop
                   setLoadingPanelCollapsed(false);
                   setGenerateState((prev) => ({ ...prev, error: null }));
                 }}
-                className="rounded-2xl border border-neutral-300 bg-white px-4 py-2 text-sm font-medium text-neutral-900 hover:bg-neutral-100"
+                variant="ghost"
+                className="rounded-2xl border border-soft-accent px-4 py-2"
               >
                 Try again
-              </button>
+              </Button>
             </div>
           ) : null}
         </div>
 
         {showProgressPanel ? (
-          <div className="rounded-3xl border border-neutral-200 bg-white p-6 shadow-sm">
+          <div className="card-surface p-6">
             <div className="flex items-start justify-between gap-3">
               <div>
-                <h2 className="text-lg font-semibold tracking-tight text-neutral-900">
+                <h2 className="text-lg font-semibold tracking-tight text-anchor">
                   Creating your story
                 </h2>
-                <p className="mt-1 text-sm text-neutral-600">
+                <p className="mt-1 text-sm text-anchor/75">
                   {loadingPanelCollapsed
                     ? `Progress: ${Math.floor(progress)}%`
                     : "We are processing your story request now."}
                 </p>
               </div>
-              <button
+              <Button
                 type="button"
                 onClick={() => setLoadingPanelCollapsed((prev) => !prev)}
-                className="rounded-xl border border-neutral-300 bg-white px-3 py-2 text-xs font-medium text-neutral-900 hover:bg-neutral-100"
+                variant="ghost"
+                className="px-3 py-2 text-xs"
               >
                 {loadingPanelCollapsed ? "Expand details" : "Minimize"}
-              </button>
+              </Button>
             </div>
 
             {loadingPanelCollapsed ? (
-              <div className="mt-4 h-2 w-full rounded-full bg-neutral-200">
+              <div className="mt-4 h-2 w-full rounded-full bg-soft-accent">
                 <div
                   className={`h-2 rounded-full transition-[width] duration-200 ${
-                    phase === "error" ? "bg-rose-500" : "bg-neutral-900"
+                    phase === "error" ? "bg-rose-500" : "bg-primary"
                   }`}
                   style={{ width: `${Math.max(0, Math.min(100, progress)).toFixed(1)}%` }}
                 />
@@ -472,35 +535,37 @@ export default function CreateStoryWizard({ universeId, characterOptions }: Prop
         ) : null}
 
         {generateState.ok ? (
-          <div className="rounded-3xl border border-neutral-200 bg-white p-6 shadow-sm space-y-4">
-            <p className="text-xs uppercase tracking-wide text-neutral-500">Story Preview</p>
-            <h2 className="text-2xl font-semibold tracking-tight text-neutral-900">
+          <div className="story-surface p-6 space-y-4">
+            <p className="text-xs uppercase tracking-wide text-anchor/65">Story Preview</p>
+            <h2 className="text-2xl font-semibold tracking-tight text-anchor">
               {generateState.generatedTitle}
             </h2>
             {generateState.generatedBlurb ? (
-              <p className="text-sm text-neutral-600">{generateState.generatedBlurb}</p>
+              <p className="text-sm text-anchor/80">{generateState.generatedBlurb}</p>
             ) : null}
             <div className="flex flex-wrap gap-2 text-xs">
-              <span className="rounded-full bg-neutral-100 px-3 py-1 font-medium text-neutral-700 capitalize">
-                {tone}
+              <span className="rounded-full bg-soft-accent px-3 py-1 font-medium text-anchor capitalize">
+                {storySpark}
               </span>
-              <span className="rounded-full bg-neutral-100 px-3 py-1 font-medium text-neutral-700">
+              <span className="rounded-full bg-soft-accent px-3 py-1 font-medium text-anchor">
                 {currentLengthLabel}
               </span>
               {generateState.wordCount > 0 ? (
-                <span className="rounded-full bg-neutral-100 px-3 py-1 font-medium text-neutral-700">
+                <span className="rounded-full bg-soft-accent px-3 py-1 text-xs font-medium text-anchor">
                   {generateState.wordCount} words
                 </span>
               ) : null}
               {generateState.sceneCount > 0 ? (
-                <span className="rounded-full bg-neutral-100 px-3 py-1 font-medium text-neutral-700">
+                <span className="rounded-full bg-soft-accent px-3 py-1 text-xs font-medium text-anchor">
                   {generateState.sceneCount} scenes
                 </span>
               ) : null}
             </div>
-            <article className="whitespace-pre-wrap leading-8 text-neutral-800">
-              {generateState.generatedContent}
-            </article>
+            <StoryBookViewer
+              title={generateState.generatedTitle}
+              content={generateState.generatedContent}
+              lengthMinutes={getLengthMinutes()}
+            />
 
             {generateState.warnings.length > 0 ? (
               <div className="rounded-2xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
@@ -519,14 +584,14 @@ export default function CreateStoryWizard({ universeId, characterOptions }: Prop
               <input type="hidden" name="guidedMiddle" value={guidedMiddle} />
               <input type="hidden" name="guidedEnding" value={guidedEnding} />
               <input type="hidden" name="stage" value={stage} />
-              <input type="hidden" name="tone" value={tone} />
+              <input type="hidden" name="tone" value={derivedTone} />
               <input type="hidden" name="audienceAge" value={audienceAge} />
               <input type="hidden" name="lengthChoice" value={lengthChoice} />
               <input type="hidden" name="customMinutes" value={customMinutes} />
               <input type="hidden" name="selectedCharactersJson" value={selectedCharactersJson} />
               <input type="hidden" name="customCharacterName" value={customCharacterName} />
               <input type="hidden" name="generatedTitle" value={generateState.generatedTitle} />
-              <input type="hidden" name="spark" value={generateState.spark} />
+              <input type="hidden" name="spark" value={storySpark} />
               <textarea
                 name="generatedContent"
                 defaultValue={generateState.generatedContent}
@@ -535,7 +600,7 @@ export default function CreateStoryWizard({ universeId, characterOptions }: Prop
               />
               <button
                 type="submit"
-                className="rounded-2xl bg-neutral-900 px-4 py-3 text-sm font-medium text-white shadow-sm transition hover:bg-neutral-800"
+                className="rounded-2xl bg-primary px-4 py-3 text-sm font-medium text-white transition hover:bg-primary-hover"
               >
                 Save to library
               </button>

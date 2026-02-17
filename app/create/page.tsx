@@ -9,6 +9,7 @@ type CharacterOption = {
   id: string;
   type: "kid" | "adult";
   label: string;
+  avatarUrl: string | null;
 };
 
 export default async function CreatePage() {
@@ -22,12 +23,12 @@ export default async function CreatePage() {
     await Promise.all([
       supabase
         .from("profiles_kid")
-        .select("id, display_name")
+        .select("id, display_name, avatar_url")
         .eq("universe_id", universe.id)
         .order("display_name", { ascending: true }),
       supabase
         .from("profiles_adult")
-        .select("id, display_name")
+        .select("id, display_name, avatar_url")
         .eq("universe_id", universe.id)
         .order("display_name", { ascending: true }),
     ]);
@@ -36,8 +37,18 @@ export default async function CreatePage() {
   if (adultsError) throw new Error(adultsError.message);
 
   const characterOptions: CharacterOption[] = [
-    ...(kids ?? []).map((k) => ({ id: k.id, type: "kid" as const, label: k.display_name })),
-    ...(adults ?? []).map((a) => ({ id: a.id, type: "adult" as const, label: a.display_name })),
+    ...(kids ?? []).map((k) => ({
+      id: k.id,
+      type: "kid" as const,
+      label: k.display_name,
+      avatarUrl: k.avatar_url ?? null,
+    })),
+    ...(adults ?? []).map((a) => ({
+      id: a.id,
+      type: "adult" as const,
+      label: a.display_name,
+      avatarUrl: a.avatar_url ?? null,
+    })),
   ];
 
   return <CreateStoryWizard universeId={universe.id} characterOptions={characterOptions} />;

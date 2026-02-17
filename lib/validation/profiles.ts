@@ -20,13 +20,37 @@ export const kidProfileSchema = baseProfileSchema.extend({
       }
       return Math.trunc(n);
     }),
-  avatar_url: z.string().trim().url("Avatar URL must be valid").optional().or(z.literal("")),
+  avatar_url: z
+    .string()
+    .trim()
+    .optional()
+    .or(z.literal(""))
+    .refine(
+      (value) =>
+        !value ||
+        value.startsWith("http://") ||
+        value.startsWith("https://") ||
+        value.startsWith("data:image/"),
+      "Avatar must be an image URL or uploaded image data."
+    ),
 });
 
 export const adultProfileSchema = z.object({
   name: z.string().trim().min(1, "Name is required").max(80, "Name is too long"),
   persona_label: z.string().trim().max(80, "Role label is too long").optional().default(""),
-  avatar_url: z.string().trim().url("Avatar URL must be valid").optional().or(z.literal("")),
+  avatar_url: z
+    .string()
+    .trim()
+    .optional()
+    .or(z.literal(""))
+    .refine(
+      (value) =>
+        !value ||
+        value.startsWith("http://") ||
+        value.startsWith("https://") ||
+        value.startsWith("data:image/"),
+      "Avatar must be an image URL or uploaded image data."
+    ),
 });
 
 export const inviteCreateSchema = z.object({

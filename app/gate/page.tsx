@@ -7,6 +7,6 @@ export default async function GatePage() {
   if (!user) redirect("/login");
   if (!membership) redirect("/onboarding");
 
-  redirect("/library");
+  redirect("/");
 }
 

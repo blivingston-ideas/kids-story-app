@@ -11,6 +11,7 @@ import {
   type WizardInput,
 } from "@/lib/validation/stories";
 import { countWords, getParagraphGuidance, getWordTargets } from "@/lib/story/length";
+import { buildStoryPageTexts } from "@/lib/story/pages";
 
 export type GenerateState = {
   ok: boolean;
@@ -695,6 +696,18 @@ export async function saveStoryAction(formData: FormData): Promise<void> {
     .single();
 
   if (storyError) throw new Error(storyError.message);
+
+  const pageRows = buildStoryPageTexts(generated.data.content, lengthMinutes).map((page) => ({
+    story_id: story.id,
+    page_index: page.pageIndex,
+    text: page.text,
+    image_status: "not_started" as const,
+  }));
+
+  if (pageRows.length > 0) {
+    const { error: pageError } = await supabase.from("story_pages").insert(pageRows);
+    if (pageError) throw new Error(pageError.message);
+  }
 
   type StoryCharacterInsert = {
     story_id: string;

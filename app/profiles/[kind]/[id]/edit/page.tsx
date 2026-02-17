@@ -30,14 +30,32 @@ async function updateProfile(formData: FormData) {
   if (!membership) redirect("/onboarding/create");
   assertParent(membership);
 
+  const avatarCandidate = formData.get("avatar_file");
+  let avatarUploadData: string | null = null;
+  if (avatarCandidate instanceof File && avatarCandidate.size > 0) {
+    const maxBytes = 1_000_000;
+    if (avatarCandidate.size > maxBytes) throw new Error("Profile photo must be 1MB or smaller.");
+    const bytes = Buffer.from(await avatarCandidate.arrayBuffer()).toString("base64");
+    const mime = avatarCandidate.type || "image/png";
+    avatarUploadData = `data:${mime};base64,${bytes}`;
+  }
+
   if (parsedParams.data.kind === "kid") {
+    const { data: existingKid, error: existingKidError } = await supabase
+      .from("profiles_kid")
+      .select("avatar_url")
+      .eq("id", parsedParams.data.id)
+      .eq("universe_id", membership.universe_id)
+      .maybeSingle();
+    if (existingKidError) throw new Error(existingKidError.message);
+
     const parsed = kidProfileSchema.safeParse({
       name: String(formData.get("name") ?? ""),
       age: String(formData.get("age") ?? ""),
       themes: String(formData.get("themes") ?? ""),
       books_we_like: String(formData.get("books_we_like") ?? ""),
       character_traits: String(formData.get("character_traits") ?? ""),
-      avatar_url: String(formData.get("avatar_url") ?? ""),
+      avatar_url: avatarUploadData ?? existingKid?.avatar_url ?? "",
     });
 
     if (!parsed.success) {
@@ -59,10 +77,18 @@ async function updateProfile(formData: FormData) {
 
     if (error) throw new Error(error.message);
   } else {
+    const { data: existingAdult, error: existingAdultError } = await supabase
+      .from("profiles_adult")
+      .select("avatar_url")
+      .eq("id", parsedParams.data.id)
+      .eq("universe_id", membership.universe_id)
+      .maybeSingle();
+    if (existingAdultError) throw new Error(existingAdultError.message);
+
     const parsed = adultProfileSchema.safeParse({
       name: String(formData.get("name") ?? ""),
       persona_label: String(formData.get("persona_label") ?? ""),
-      avatar_url: String(formData.get("avatar_url") ?? ""),
+      avatar_url: avatarUploadData ?? existingAdult?.avatar_url ?? "",
     });
 
     if (!parsed.success) {
@@ -152,10 +178,10 @@ export default async function EditProfilePage({
                 placeholder="Character traits"
               />
               <input
-                name="avatar_url"
-                defaultValue={kid.avatar_url ?? ""}
-                className="w-full rounded-2xl border border-neutral-300 px-4 py-3 text-sm"
-                placeholder="Avatar URL"
+                type="file"
+                name="avatar_file"
+                accept="image/*"
+                className="w-full rounded-2xl border border-neutral-300 px-4 py-3 text-sm file:mr-4 file:rounded-lg file:border-0 file:bg-neutral-900 file:px-3 file:py-2 file:text-sm file:font-medium file:text-white hover:file:bg-neutral-800"
               />
               <div className="flex gap-3">
                 <button
@@ -209,10 +235,10 @@ export default async function EditProfilePage({
               placeholder='Role label (e.g. "Inventor")'
             />
             <input
-              name="avatar_url"
-              defaultValue={adult.avatar_url ?? ""}
-              className="w-full rounded-2xl border border-neutral-300 px-4 py-3 text-sm"
-              placeholder="Avatar URL"
+              type="file"
+              name="avatar_file"
+              accept="image/*"
+              className="w-full rounded-2xl border border-neutral-300 px-4 py-3 text-sm file:mr-4 file:rounded-lg file:border-0 file:bg-neutral-900 file:px-3 file:py-2 file:text-sm file:font-medium file:text-white hover:file:bg-neutral-800"
             />
             <div className="flex gap-3">
               <button

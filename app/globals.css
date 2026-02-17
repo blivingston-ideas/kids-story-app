@@ -1,28 +1,53 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #f6fcfb;
+  --foreground: #293241;
   --font-geist-sans: Arial, Helvetica, sans-serif;
   --font-geist-mono: "Courier New", Courier, monospace;
+  --color-primary: #ff9f1c;
+  --color-primary-hover: #eb921a;
+  --color-secondary: #2ec4b6;
+  --color-secondary-hover: #2ab4a7;
+  --color-accent: #ffbf69;
+  --color-soft-accent: #cbf3f0;
+  --color-anchor: #293241;
+  --color-app-bg: #f6fcfb;
+  --color-card-bg: #ffffff;
+  --color-story-bg: #fff8f0;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+  --color-primary: var(--color-primary);
+  --color-primary-hover: var(--color-primary-hover);
+  --color-secondary: var(--color-secondary);
+  --color-secondary-hover: var(--color-secondary-hover);
+  --color-accent: var(--color-accent);
+  --color-soft-accent: var(--color-soft-accent);
+  --color-anchor: var(--color-anchor);
+  --color-app-bg: var(--color-app-bg);
+  --color-card-bg: var(--color-card-bg);
+  --color-story-bg: var(--color-story-bg);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+body {
+  background: var(--color-app-bg);
+  color: var(--color-anchor);
+  font-family: Arial, Helvetica, sans-serif;
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+.card-surface {
+  background: var(--color-card-bg);
+  border-radius: 16px;
+  box-shadow: 0 10px 24px -20px rgba(41, 50, 65, 0.35);
+}
+
+.story-surface {
+  background: var(--color-story-bg);
+  border-radius: 16px;
+  box-shadow: 0 10px 24px -20px rgba(41, 50, 65, 0.3);
 }

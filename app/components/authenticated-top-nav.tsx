@@ -12,27 +12,39 @@ async function logoutAction() {
 
 export default function AuthenticatedTopNav() {
   return (
-    <header className="border-b border-neutral-200 bg-white/95 backdrop-blur">
+    <header className="border-b border-soft-accent bg-card-bg/95 backdrop-blur">
       <div className="mx-auto flex h-16 w-full max-w-6xl items-center justify-between px-6">
         <nav className="flex items-center gap-2 text-sm font-medium">
           <Link
+            href="/"
+            className="rounded-xl px-3 py-2 text-anchor transition hover:bg-soft-accent hover:text-anchor"
+          >
+            Home
+          </Link>
+          <Link
             href="/library"
-            className="rounded-xl px-3 py-2 text-neutral-700 transition hover:bg-neutral-100 hover:text-neutral-900"
+            className="rounded-xl px-3 py-2 text-anchor transition hover:bg-soft-accent hover:text-anchor"
           >
             Library
           </Link>
           <Link
             href="/profiles"
-            className="rounded-xl px-3 py-2 text-neutral-700 transition hover:bg-neutral-100 hover:text-neutral-900"
+            className="rounded-xl px-3 py-2 text-anchor transition hover:bg-soft-accent hover:text-anchor"
           >
             Profiles
+          </Link>
+          <Link
+            href="/universe"
+            className="rounded-xl px-3 py-2 text-anchor transition hover:bg-soft-accent hover:text-anchor"
+          >
+            Universe
           </Link>
         </nav>
 
         <form action={logoutAction}>
           <button
             type="submit"
-            className="rounded-xl bg-neutral-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-neutral-800"
+            className="rounded-xl bg-primary px-4 py-2 text-sm font-medium text-white transition hover:bg-primary-hover"
           >
             Log out
           </button>
