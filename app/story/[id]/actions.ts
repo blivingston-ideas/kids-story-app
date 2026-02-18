@@ -6,6 +6,7 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { getCurrentUniverseContext } from "@/lib/data/auth-context";
 
 const storyIdSchema = z.string().uuid("Invalid story id");
+const imageModeSchema = z.enum(["fast", "best"]);
 
 export async function createShareAction(storyId: string): Promise<void> {
   const parsedId = storyIdSchema.safeParse(storyId);
@@ -84,6 +85,35 @@ export async function revokeShareAction(storyId: string): Promise<void> {
     .is("revoked_at", null);
 
   if (error) throw new Error(error.message);
+
+  revalidatePath(`/story/${story.id}`);
+}
+
+export async function updateStoryImageModeAction(storyId: string, formData: FormData): Promise<void> {
+  const parsedId = storyIdSchema.safeParse(storyId);
+  if (!parsedId.success) throw new Error(parsedId.error.issues[0]?.message ?? "Invalid story id");
+
+  const parsedMode = imageModeSchema.safeParse(String(formData.get("image_mode") ?? ""));
+  if (!parsedMode.success) throw new Error(parsedMode.error.issues[0]?.message ?? "Invalid image mode");
+
+  const supabase = await createSupabaseServerClient();
+  const { user, membership } = await getCurrentUniverseContext();
+  if (!user) throw new Error("Authentication required.");
+  if (!membership) throw new Error("No active membership.");
+
+  const { data: story, error: storyError } = await supabase
+    .from("stories")
+    .select("id, universe_id")
+    .eq("id", parsedId.data)
+    .maybeSingle();
+  if (storyError) throw new Error(storyError.message);
+  if (!story || story.universe_id !== membership.universe_id) throw new Error("Story not found.");
+
+  const { error: updateError } = await supabase
+    .from("stories")
+    .update({ image_mode: parsedMode.data })
+    .eq("id", story.id);
+  if (updateError) throw new Error(updateError.message);
 
   revalidatePath(`/story/${story.id}`);
 }

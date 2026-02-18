@@ -113,21 +113,41 @@ export default async function ProfilesPage() {
 
   const parent = isParent(membership);
 
-  const [{ data: kids, error: kidsError }, { data: adults, error: adultsError }] =
-    await Promise.all([
-      supabase
+  const kidPrimary = await supabase
+    .from("profiles_kid")
+    .select(
+      "id, display_name, age, themes, books_we_like, avatar_url, profile_photo_url, created_at"
+    )
+    .eq("universe_id", universe.id)
+    .order("created_at", { ascending: false });
+  const kidFallback = kidPrimary.error?.message.includes("column profiles_kid.profile_photo_url does not exist")
+    ? await supabase
         .from("profiles_kid")
-        .select(
-          "id, display_name, age, themes, character_traits, books_we_like, avatar_url, created_at"
-        )
+        .select("id, display_name, age, themes, books_we_like, avatar_url, created_at")
         .eq("universe_id", universe.id)
-        .order("created_at", { ascending: false }),
-      supabase
+        .order("created_at", { ascending: false })
+    : null;
+  const kids = kidFallback
+    ? (kidFallback.data ?? []).map((k) => ({ ...k, profile_photo_url: null }))
+    : (kidPrimary.data ?? []);
+  const kidsError = kidFallback ? kidFallback.error : kidPrimary.error;
+
+  const adultPrimary = await supabase
+    .from("profiles_adult")
+    .select("id, display_name, persona_label, avatar_url, profile_photo_url, created_at")
+    .eq("universe_id", universe.id)
+    .order("created_at", { ascending: false });
+  const adultFallback = adultPrimary.error?.message.includes("column profiles_adult.profile_photo_url does not exist")
+    ? await supabase
         .from("profiles_adult")
         .select("id, display_name, persona_label, avatar_url, created_at")
         .eq("universe_id", universe.id)
-        .order("created_at", { ascending: false }),
-    ]);
+        .order("created_at", { ascending: false })
+    : null;
+  const adults = adultFallback
+    ? (adultFallback.data ?? []).map((a) => ({ ...a, profile_photo_url: null }))
+    : (adultPrimary.data ?? []);
+  const adultsError = adultFallback ? adultFallback.error : adultPrimary.error;
 
   if (kidsError) throw new Error(kidsError.message);
   if (adultsError) throw new Error(adultsError.message);
@@ -189,10 +209,10 @@ export default async function ProfilesPage() {
                   className="rounded-2xl border border-neutral-200 bg-neutral-50 p-4 flex flex-col gap-4"
                 >
                   <div className="flex items-center gap-3">
-                    {kid.avatar_url ? (
+                    {kid.profile_photo_url || kid.avatar_url ? (
                       // eslint-disable-next-line @next/next/no-img-element
                       <img
-                        src={kid.avatar_url}
+                        src={kid.profile_photo_url ? `/api/profiles/photo/kid/${kid.id}` : kid.avatar_url}
                         alt={`${kid.display_name} avatar`}
                         className="h-12 w-12 rounded-xl border border-neutral-200 bg-white object-cover"
                       />
@@ -208,16 +228,15 @@ export default async function ProfilesPage() {
                   </div>
 
                   <div className="space-y-2 text-xs text-neutral-700">
+                    <p className="text-[11px] font-semibold uppercase tracking-wide text-neutral-500">
+                      Profile details
+                    </p>
                     <p>
                       <span className="font-medium text-neutral-900">Age:</span> {kid.age ?? "n/a"}
                     </p>
                     <p>
-                      <span className="font-medium text-neutral-900">Themes:</span>{" "}
+                      <span className="font-medium text-neutral-900">Favourite things:</span>{" "}
                       {kid.themes?.slice(0, 3).join(", ") || "none"}
-                    </p>
-                    <p>
-                      <span className="font-medium text-neutral-900">Traits:</span>{" "}
-                      {kid.character_traits?.slice(0, 3).join(", ") || "none"}
                     </p>
                     <p>
                       <span className="font-medium text-neutral-900">Books:</span>{" "}
@@ -272,10 +291,10 @@ export default async function ProfilesPage() {
                   className="rounded-2xl border border-neutral-200 bg-neutral-50 p-4 flex flex-col gap-4"
                 >
                   <div className="flex items-center gap-3">
-                    {adult.avatar_url ? (
+                    {adult.profile_photo_url || adult.avatar_url ? (
                       // eslint-disable-next-line @next/next/no-img-element
                       <img
-                        src={adult.avatar_url}
+                        src={adult.profile_photo_url ? `/api/profiles/photo/adult/${adult.id}` : adult.avatar_url}
                         alt={`${adult.display_name} avatar`}
                         className="h-12 w-12 rounded-xl border border-neutral-200 bg-white object-cover"
                       />
@@ -291,6 +310,9 @@ export default async function ProfilesPage() {
                   </div>
 
                   <div className="space-y-2 text-xs text-neutral-700">
+                    <p className="text-[11px] font-semibold uppercase tracking-wide text-neutral-500">
+                      Profile details
+                    </p>
                     <p>
                       <span className="font-medium text-neutral-900">Role label:</span>{" "}
                       {adult.persona_label || "none"}

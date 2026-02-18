@@ -74,8 +74,8 @@ export default async function LibraryPage() {
       .filter((r) => r.story_id === story.id)
       .map((r) => {
         if (r.character_type === "custom") return r.custom_name;
-        if (r.character_type === "kid" && r.character_id) return kidMap.get(r.character_id) ?? null;
-        if (r.character_type === "adult" && r.character_id) return adultMap.get(r.character_id) ?? null;
+        if (r.character_type === "kid" && r.character_id) return kidMap.get(r.character_id) ?? r.custom_name ?? null;
+        if (r.character_type === "adult" && r.character_id) return adultMap.get(r.character_id) ?? r.custom_name ?? null;
         return null;
       })
       .filter((name): name is string => Boolean(name));

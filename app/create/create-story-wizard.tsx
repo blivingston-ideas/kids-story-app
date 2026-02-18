@@ -12,6 +12,7 @@ type CharacterOption = {
   type: "kid" | "adult";
   label: string;
   avatarUrl: string | null;
+  age: number | null;
 };
 
 type StorySpark =
@@ -66,6 +67,11 @@ type GenerateState = {
   warnings: string[];
   wordCount: number;
   sceneCount: number;
+  generationCostsJson: string;
+  generatedPagesJson: string;
+  storyBibleJson: string;
+  beatSheetJson: string;
+  continuityLedgerJson: string;
 };
 
 export default function CreateStoryWizard({ universeId, characterOptions }: Props) {
@@ -99,6 +105,11 @@ export default function CreateStoryWizard({ universeId, characterOptions }: Prop
     warnings: [],
     wordCount: 0,
     sceneCount: 0,
+    generationCostsJson: "[]",
+    generatedPagesJson: "[]",
+    storyBibleJson: "{}",
+    beatSheetJson: "{}",
+    continuityLedgerJson: "{}",
   });
 
   const selectedCharacters = useMemo(
@@ -108,6 +119,43 @@ export default function CreateStoryWizard({ universeId, characterOptions }: Prop
         .map((c) => ({ type: c.type, id: c.id, label: c.label })),
     [characterOptions, selectedCharacterKeys]
   );
+
+  const selectedKidAges = useMemo(
+    () =>
+      characterOptions
+        .filter((c) => c.type === "kid" && selectedCharacterKeys.includes(`${c.type}:${c.id}`))
+        .map((c) => c.age)
+        .filter((age): age is number => typeof age === "number" && Number.isFinite(age)),
+    [characterOptions, selectedCharacterKeys]
+  );
+
+  const effectiveAudienceAge = useMemo(() => {
+    if (selectedKidAges.length > 0) {
+      const avg = selectedKidAges.reduce((sum, age) => sum + age, 0) / selectedKidAges.length;
+      return Math.max(1, Math.min(17, Number(avg.toFixed(1))));
+    }
+    const fallback = Number(audienceAge);
+    if (!Number.isFinite(fallback)) return 6;
+    return Math.max(1, Math.min(17, fallback));
+  }, [selectedKidAges, audienceAge]);
+  const previewPages = useMemo(() => {
+    try {
+      const parsed = JSON.parse(generateState.generatedPagesJson) as Array<{ page_number: number; text: string }>;
+      if (!Array.isArray(parsed)) return [];
+      return parsed
+        .filter((p) => typeof p.page_number === "number" && typeof p.text === "string")
+        .sort((a, b) => a.page_number - b.page_number)
+        .map((p) => ({
+          pageIndex: p.page_number - 1,
+          text: p.text,
+          imageStatus: "pending" as const,
+          imageUrl: null,
+          imageError: null,
+        }));
+    } catch {
+      return [];
+    }
+  }, [generateState.generatedPagesJson]);
 
   const selectedCharactersJson = JSON.stringify(selectedCharacters);
   const derivedTone = toneForSpark(storySpark);
@@ -162,7 +210,7 @@ export default function CreateStoryWizard({ universeId, characterOptions }: Prop
           storySpark,
           lengthMinutes: getLengthMinutes(),
           surpriseVsGuided: mode,
-          audienceAge: Number(audienceAge),
+          audienceAge: effectiveAudienceAge,
           optionalPrompt,
         }),
       });
@@ -172,9 +220,26 @@ export default function CreateStoryWizard({ universeId, characterOptions }: Prop
         error?: string;
         title?: string;
         storyText?: string;
+        pages?: Array<{ page_number: number; text: string }>;
+        storyBible?: Record<string, unknown>;
+        beatSheet?: Record<string, unknown>;
+        continuityLedger?: Record<string, unknown>;
         warnings?: string[];
         wordCount?: number;
         sceneCount?: number;
+        generationCosts?: Array<{
+          page_number: number | null;
+          step: string;
+          provider: "openai";
+          model: string;
+          input_tokens: number;
+          output_tokens: number;
+          total_tokens: number;
+          cached_input_tokens: number | null;
+          reasoning_tokens: number | null;
+          cost_usd: number;
+          response_id: string | null;
+        }>;
       };
 
       if (!response.ok || !payload.ok || !payload.title || !payload.storyText) {
@@ -196,6 +261,11 @@ export default function CreateStoryWizard({ universeId, characterOptions }: Prop
         warnings: payload.warnings ?? [],
         wordCount: payload.wordCount ?? 0,
         sceneCount: payload.sceneCount ?? 0,
+        generationCostsJson: JSON.stringify(payload.generationCosts ?? []),
+        generatedPagesJson: JSON.stringify(payload.pages ?? []),
+        storyBibleJson: JSON.stringify(payload.storyBible ?? {}),
+        beatSheetJson: JSON.stringify(payload.beatSheet ?? {}),
+        continuityLedgerJson: JSON.stringify(payload.continuityLedger ?? {}),
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Could not generate story.";
@@ -212,10 +282,15 @@ export default function CreateStoryWizard({ universeId, characterOptions }: Prop
     setStageIdeaError(null);
     setStageIdeaLoading(true);
     try {
+      const kidProfileIds = selectedCharacters.filter((c) => c.type === "kid").map((c) => c.id);
+      const selectedCharacterNames = [
+        ...selectedCharacters.map((c) => c.label.trim()).filter(Boolean),
+        customCharacterName.trim(),
+      ].filter(Boolean);
       const response = await fetch("/api/stories/stage-blurb", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ storySpark }),
+        body: JSON.stringify({ storySpark, universeId, kidProfileIds, selectedCharacterNames }),
       });
       const payload = (await response.json()) as { ok?: boolean; blurb?: string; error?: string };
       if (!response.ok || !payload.ok || !payload.blurb) {
@@ -236,9 +311,9 @@ export default function CreateStoryWizard({ universeId, characterOptions }: Prop
 
   const canGenerate =
     customMinutesValid &&
-    Number.isFinite(Number(audienceAge)) &&
-    Number(audienceAge) >= 1 &&
-    Number(audienceAge) <= 17 &&
+    Number.isFinite(effectiveAudienceAge) &&
+    effectiveAudienceAge >= 1 &&
+    effectiveAudienceAge <= 17 &&
     (selectedCharacters.length > 0 || customCharacterName.trim().length > 0);
 
   const showProgressPanel = generating || phase === "error" || phase === "done";
@@ -276,7 +351,7 @@ export default function CreateStoryWizard({ universeId, characterOptions }: Prop
                 {currentLengthLabel}
               </span>
               <span className="rounded-full bg-soft-accent px-3 py-1 font-medium text-anchor">
-                Audience age {audienceAge}
+                Audience age {effectiveAudienceAge}
               </span>
             </div>
           ) : null}
@@ -565,6 +640,7 @@ export default function CreateStoryWizard({ universeId, characterOptions }: Prop
               title={generateState.generatedTitle}
               content={generateState.generatedContent}
               lengthMinutes={getLengthMinutes()}
+              storyPages={previewPages}
             />
 
             {generateState.warnings.length > 0 ? (
@@ -585,13 +661,18 @@ export default function CreateStoryWizard({ universeId, characterOptions }: Prop
               <input type="hidden" name="guidedEnding" value={guidedEnding} />
               <input type="hidden" name="stage" value={stage} />
               <input type="hidden" name="tone" value={derivedTone} />
-              <input type="hidden" name="audienceAge" value={audienceAge} />
+              <input type="hidden" name="audienceAge" value={String(effectiveAudienceAge)} />
               <input type="hidden" name="lengthChoice" value={lengthChoice} />
               <input type="hidden" name="customMinutes" value={customMinutes} />
               <input type="hidden" name="selectedCharactersJson" value={selectedCharactersJson} />
               <input type="hidden" name="customCharacterName" value={customCharacterName} />
               <input type="hidden" name="generatedTitle" value={generateState.generatedTitle} />
               <input type="hidden" name="spark" value={storySpark} />
+              <input type="hidden" name="generationCostsJson" value={generateState.generationCostsJson} />
+              <input type="hidden" name="generatedPagesJson" value={generateState.generatedPagesJson} />
+              <input type="hidden" name="storyBibleJson" value={generateState.storyBibleJson} />
+              <input type="hidden" name="beatSheetJson" value={generateState.beatSheetJson} />
+              <input type="hidden" name="continuityLedgerJson" value={generateState.continuityLedgerJson} />
               <textarea
                 name="generatedContent"
                 defaultValue={generateState.generatedContent}

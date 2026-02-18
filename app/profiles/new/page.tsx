@@ -7,6 +7,8 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { getCurrentUniverseContext } from "@/lib/data/auth-context";
 import { assertParent, isParent } from "@/lib/data/roles";
 import { adultProfileSchema, kidProfileSchema, parseCsvList } from "@/lib/validation/profiles";
+import { normalizeProfileAppearance, type ProfileAppearance } from "@/lib/schemas/profileAppearance";
+import { uploadProfilePhoto } from "@/lib/profiles/photo";
 import ProfileCreateForm from "@/app/profiles/new/profile-create-form";
 
 type ProfileType = "kid" | "adult" | "grandparent" | "aunt_uncle" | "cousin";
@@ -17,16 +19,6 @@ function profileTypeLabel(profileType: Exclude<ProfileType, "kid">): string {
   if (profileType === "grandparent") return "Grandparent";
   if (profileType === "aunt_uncle") return "Aunt/Uncle";
   return "Cousin";
-}
-
-async function toDataUrl(file: File): Promise<string> {
-  const maxBytes = 1_000_000;
-  if (file.size > maxBytes) {
-    throw new Error("Profile photo must be 1MB or smaller.");
-  }
-  const bytes = Buffer.from(await file.arrayBuffer()).toString("base64");
-  const mime = file.type || "image/png";
-  return `data:${mime};base64,${bytes}`;
 }
 
 async function createProfile(formData: FormData) {
@@ -42,62 +34,138 @@ async function createProfile(formData: FormData) {
   const universeId = membership.universe_id;
   const profileType = String(formData.get("profile_type") ?? "kid") as ProfileType;
 
-  const avatarCandidate = formData.get("avatar_file");
-  let avatarUrl = "";
-  if (avatarCandidate instanceof File && avatarCandidate.size > 0) {
-    avatarUrl = await toDataUrl(avatarCandidate);
+  const appearanceRaw = String(formData.get("profile_appearance_json") ?? "{}");
+  let appearance: ProfileAppearance;
+  try {
+    appearance = normalizeProfileAppearance(JSON.parse(appearanceRaw) as unknown);
+  } catch {
+    throw new Error("Invalid appearance data.");
   }
 
   const themesValue = String(formData.get("themes") ?? "");
   const booksValue = String(formData.get("books_we_like") ?? "");
-  const traitsValue = String(formData.get("character_traits") ?? "");
-  const catchPhrasesValue = String(formData.get("catch_phrases") ?? "");
-
   if (profileType === "kid") {
     const parsed = kidProfileSchema.safeParse({
       name: String(formData.get("name") ?? ""),
       age: String(formData.get("age") ?? ""),
       themes: themesValue,
       books_we_like: booksValue,
-      character_traits: [traitsValue, catchPhrasesValue].filter(Boolean).join(", "),
-      avatar_url: avatarUrl,
+      avatar_url: "",
     });
 
     if (!parsed.success) {
       throw new Error(parsed.error.issues[0]?.message ?? "Invalid kid profile data");
     }
 
-    const { error } = await supabase.from("profiles_kid").insert({
+    const kidInsertPrimary = await supabase
+      .from("profiles_kid")
+      .insert({
       universe_id: universeId,
       display_name: parsed.data.name,
       age: parsed.data.age,
       themes: parseCsvList(parsed.data.themes),
       books_we_like: parseCsvList(parsed.data.books_we_like),
-      character_traits: parseCsvList(parsed.data.character_traits),
-      avatar_url: parsed.data.avatar_url || null,
-    });
+      avatar_url: null,
+      profile_appearance_json: appearance,
+    })
+      .select("id")
+      .single();
+    const kidInsertFallback = kidInsertPrimary.error?.message.includes("column \"profile_appearance_json\"")
+      ? await supabase
+          .from("profiles_kid")
+          .insert({
+            universe_id: universeId,
+            display_name: parsed.data.name,
+            age: parsed.data.age,
+            themes: parseCsvList(parsed.data.themes),
+            books_we_like: parseCsvList(parsed.data.books_we_like),
+            avatar_url: null,
+          })
+          .select("id")
+          .single()
+      : null;
+    const insertedKid = kidInsertFallback ? kidInsertFallback.data : kidInsertPrimary.data;
+    const kidInsertError = kidInsertFallback ? kidInsertFallback.error : kidInsertPrimary.error;
+    if (kidInsertError) throw new Error(kidInsertError.message);
+    if (!insertedKid) throw new Error("Failed to create kid profile.");
 
-    if (error) throw new Error(error.message);
+    const photoFile = formData.get("profile_photo_file");
+    if (photoFile instanceof File && photoFile.size > 0) {
+      const photoPath = await uploadProfilePhoto({ profileId: insertedKid.id, file: photoFile });
+      const photoUpdatePrimary = await supabase
+        .from("profiles_kid")
+        .update({ profile_photo_url: photoPath })
+        .eq("id", insertedKid.id)
+        .eq("universe_id", universeId);
+      const photoUpdateFallback = photoUpdatePrimary.error?.message.includes("column \"profile_photo_url\"")
+        ? await supabase
+            .from("profiles_kid")
+            .update({ avatar_url: null })
+            .eq("id", insertedKid.id)
+            .eq("universe_id", universeId)
+        : null;
+      const photoUpdateError = photoUpdateFallback ? photoUpdateFallback.error : photoUpdatePrimary.error;
+      if (photoUpdateError) throw new Error(photoUpdateError.message);
+    }
   } else {
     const parsed = adultProfileSchema.safeParse({
       name: String(formData.get("name") ?? ""),
       persona_label: profileTypeLabel(profileType),
-      avatar_url: avatarUrl,
+      avatar_url: "",
     });
 
     if (!parsed.success) {
       throw new Error(parsed.error.issues[0]?.message ?? "Invalid profile data");
     }
 
-    const { error } = await supabase.from("profiles_adult").insert({
+    const adultInsertPrimary = await supabase
+      .from("profiles_adult")
+      .insert({
       universe_id: universeId,
       user_id: user.id,
       display_name: parsed.data.name,
       persona_label: parsed.data.persona_label || null,
-      avatar_url: parsed.data.avatar_url || null,
-    });
+      avatar_url: null,
+      profile_appearance_json: appearance,
+    })
+      .select("id")
+      .single();
+    const adultInsertFallback = adultInsertPrimary.error?.message.includes("column \"profile_appearance_json\"")
+      ? await supabase
+          .from("profiles_adult")
+          .insert({
+            universe_id: universeId,
+            user_id: user.id,
+            display_name: parsed.data.name,
+            persona_label: parsed.data.persona_label || null,
+            avatar_url: null,
+          })
+          .select("id")
+          .single()
+      : null;
+    const insertedAdult = adultInsertFallback ? adultInsertFallback.data : adultInsertPrimary.data;
+    const adultInsertError = adultInsertFallback ? adultInsertFallback.error : adultInsertPrimary.error;
+    if (adultInsertError) throw new Error(adultInsertError.message);
+    if (!insertedAdult) throw new Error("Failed to create adult profile.");
 
-    if (error) throw new Error(error.message);
+    const photoFile = formData.get("profile_photo_file");
+    if (photoFile instanceof File && photoFile.size > 0) {
+      const photoPath = await uploadProfilePhoto({ profileId: insertedAdult.id, file: photoFile });
+      const photoUpdatePrimary = await supabase
+        .from("profiles_adult")
+        .update({ profile_photo_url: photoPath })
+        .eq("id", insertedAdult.id)
+        .eq("universe_id", universeId);
+      const photoUpdateFallback = photoUpdatePrimary.error?.message.includes("column \"profile_photo_url\"")
+        ? await supabase
+            .from("profiles_adult")
+            .update({ avatar_url: null })
+            .eq("id", insertedAdult.id)
+            .eq("universe_id", universeId)
+        : null;
+      const photoUpdateError = photoUpdateFallback ? photoUpdateFallback.error : photoUpdatePrimary.error;
+      if (photoUpdateError) throw new Error(photoUpdateError.message);
+    }
   }
 
   revalidatePath("/onboarding");

@@ -4,7 +4,8 @@ import {
   generateStoryInputSchema,
   type GenerateStoryInput,
 } from "@/lib/storygen/schemas";
-import { generateStory } from "@/lib/storygen/generator";
+import { runStoryPipeline } from "@/lib/storygen/pipeline";
+import type { CostRow } from "@/lib/openai/callWithCost";
 
 type KidRow = {
   id: string;
@@ -12,7 +13,6 @@ type KidRow = {
   age: number | null;
   themes: string[] | null;
   books_we_like: string[] | null;
-  character_traits: string[] | null;
 };
 
 type AdultRow = {
@@ -74,7 +74,7 @@ export async function POST(request: NextRequest) {
       input.kidProfileIds.length > 0
         ? await supabase
             .from("profiles_kid")
-            .select("id, display_name, age, themes, books_we_like, character_traits")
+            .select("id, display_name, age, themes, books_we_like")
             .eq("universe_id", input.universeId)
             .in("id", input.kidProfileIds)
         : { data: [], error: null };
@@ -96,24 +96,58 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ ok: false, error: adultsError.message }, { status: 500 });
     }
 
-    const result = await generateStory({
-      ...input,
-      storyBible: {
-        universeName: universe.name,
-        kids: (kids ?? []) as KidRow[],
-        adults: (adults ?? []) as AdultRow[],
+    const deferredCosts: Array<Omit<CostRow, "story_id">> = [];
+    const result = await runStoryPipeline(
+      {
+        ...input,
+        storyBible: {
+          universeName: universe.name,
+          kids: (kids ?? []) as KidRow[],
+          adults: (adults ?? []) as AdultRow[],
+        },
       },
-    });
+      async (
+        step: string,
+        payload: Record<string, unknown>,
+        responsePayload: Record<string, unknown>
+      ) => {
+        const { error: logError } = await supabase.from("generation_logs").insert({
+          universe_id: input.universeId,
+          story_id: null,
+          step,
+          payload,
+          response: responsePayload,
+        });
+        if (logError) {
+          const missingTable =
+            logError.message.includes("Could not find the table 'public.generation_logs'") ||
+            logError.message.includes("relation \"generation_logs\" does not exist");
+          if (!missingTable) {
+            console.warn(`[generation_logs] ${logError.message}`);
+          }
+        }
+      },
+      {
+        storyId: null,
+        onCost: (row) => {
+          deferredCosts.push(row);
+        },
+      }
+    );
 
     return NextResponse.json(
       {
         ok: true,
         title: result.title,
         storyText: result.storyText,
-        outlineJson: result.outlineJson,
+        pages: result.pages,
+        storyBible: result.storyBible,
+        beatSheet: result.beatSheet,
+        continuityLedger: result.continuityLedger,
         wordCount: result.wordCount,
-        sceneCount: result.sceneCount,
+        sceneCount: result.pages.length,
         warnings: result.warnings,
+        generationCosts: deferredCosts,
       },
       { status: 200 }
     );

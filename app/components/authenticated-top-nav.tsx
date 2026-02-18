@@ -39,6 +39,12 @@ export default function AuthenticatedTopNav() {
           >
             Universe
           </Link>
+          <Link
+            href="/create"
+            className="rounded-xl bg-primary px-4 py-2 text-sm font-medium text-white transition hover:bg-primary-hover"
+          >
+            Spark a story ✨
+          </Link>
         </nav>
 
         <form action={logoutAction}>

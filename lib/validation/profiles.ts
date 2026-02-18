@@ -4,7 +4,6 @@ const baseProfileSchema = z.object({
   name: z.string().trim().min(1, "Name is required").max(80, "Name is too long"),
   themes: z.string().optional().default(""),
   books_we_like: z.string().optional().default(""),
-  character_traits: z.string().optional().default(""),
 });
 
 export const kidProfileSchema = baseProfileSchema.extend({

@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import Button from "@/components/button";
+import AppearanceFields from "@/app/profiles/components/appearance-fields";
 
 type Props = {
   action: (formData: FormData) => Promise<void>;
@@ -43,18 +44,9 @@ export default function ProfileCreateForm({ action }: Props) {
   const [bookLinkInput, setBookLinkInput] = useState("");
   const [books, setBooks] = useState<string[]>([]);
 
-  const [traitInput, setTraitInput] = useState("");
-  const [traits, setTraits] = useState<string[]>([]);
-
-  const [catchInput, setCatchInput] = useState("");
-  const [catchPhrases, setCatchPhrases] = useState<string[]>([]);
-
   const isKid = profileType === "kid";
 
-  const ageOptions = useMemo(
-    () => Array.from({ length: 101 }).map((_, i) => i.toString()),
-    []
-  );
+  const ageOptions = useMemo(() => Array.from({ length: 101 }).map((_, i) => i.toString()), []);
 
   function onTagKeyDown(
     e: React.KeyboardEvent<HTMLInputElement>,
@@ -139,7 +131,7 @@ export default function ProfileCreateForm({ action }: Props) {
 
       <div className="space-y-2">
         <label htmlFor="theme_input" className="text-sm font-medium text-anchor">
-          Themes
+          Favourite things
         </label>
         <input
           id="theme_input"
@@ -157,7 +149,7 @@ export default function ProfileCreateForm({ action }: Props) {
               onClick={() => removeAt(i, setThemes)}
               className="rounded-full bg-soft-accent px-3 py-1 text-xs font-medium text-anchor"
             >
-              {theme} ×
+              {theme} x
             </button>
           ))}
         </div>
@@ -225,7 +217,7 @@ export default function ProfileCreateForm({ action }: Props) {
                 onClick={() => removeAt(i, setBooks)}
                 className="rounded-full bg-soft-accent px-3 py-1 text-xs font-medium text-anchor"
               >
-                {book} ×
+                {book} x
               </button>
             ))}
           </div>
@@ -235,73 +227,7 @@ export default function ProfileCreateForm({ action }: Props) {
         <input type="hidden" name="books_we_like" value="" />
       )}
 
-      <div className="space-y-2">
-        <label htmlFor="trait_input" className="text-sm font-medium text-anchor">
-          Character traits
-        </label>
-        <input
-          id="trait_input"
-          value={traitInput}
-          onChange={(e) => setTraitInput(e.target.value)}
-          onKeyDown={(e) => onTagKeyDown(e, traitInput, setTraitInput, setTraits)}
-          placeholder="Type a trait then hit Enter or comma"
-          className="w-full rounded-xl border border-soft-accent bg-white px-4 py-3 text-sm text-anchor outline-none transition focus:border-secondary focus:ring-4 focus:ring-soft-accent/70"
-        />
-        <div className="flex flex-wrap gap-2">
-          {traits.map((trait, i) => (
-            <button
-              key={`${trait}-${i}`}
-              type="button"
-              onClick={() => removeAt(i, setTraits)}
-              className="rounded-full bg-soft-accent px-3 py-1 text-xs font-medium text-anchor"
-            >
-              {trait} ×
-            </button>
-          ))}
-        </div>
-        <input type="hidden" name="character_traits" value={toCsv(traits)} />
-      </div>
-
-      <div className="space-y-2">
-        <label htmlFor="catch_input" className="text-sm font-medium text-anchor">
-          Catch phrases
-        </label>
-        <input
-          id="catch_input"
-          value={catchInput}
-          onChange={(e) => setCatchInput(e.target.value)}
-          onKeyDown={(e) => onTagKeyDown(e, catchInput, setCatchInput, setCatchPhrases)}
-          placeholder="Type a catch phrase then hit Enter or comma"
-          className="w-full rounded-xl border border-soft-accent bg-white px-4 py-3 text-sm text-anchor outline-none transition focus:border-secondary focus:ring-4 focus:ring-soft-accent/70"
-        />
-        <div className="flex flex-wrap gap-2">
-          {catchPhrases.map((phrase, i) => (
-            <button
-              key={`${phrase}-${i}`}
-              type="button"
-              onClick={() => removeAt(i, setCatchPhrases)}
-              className="rounded-full bg-soft-accent px-3 py-1 text-xs font-medium text-anchor"
-            >
-              {phrase} ×
-            </button>
-          ))}
-        </div>
-        <input type="hidden" name="catch_phrases" value={toCsv(catchPhrases)} />
-      </div>
-
-      <div className="space-y-2">
-        <label htmlFor="avatar_file" className="text-sm font-medium text-anchor">
-          Profile picture
-        </label>
-        <input
-          id="avatar_file"
-          name="avatar_file"
-          type="file"
-          accept="image/*"
-          className="block w-full rounded-xl border border-soft-accent bg-white px-4 py-3 text-sm text-anchor file:mr-4 file:rounded-lg file:border-0 file:bg-secondary file:px-3 file:py-2 file:text-sm file:font-medium file:text-white hover:file:bg-secondary-hover"
-        />
-        <p className="text-xs text-anchor/65">Optional. Max size 1MB.</p>
-      </div>
+      <AppearanceFields fileInputName="profile_photo_file" />
 
       <div className="flex flex-col gap-3 sm:flex-row sm:justify-end">
         <Button type="submit" variant="primary" className="rounded-2xl px-5 py-3">

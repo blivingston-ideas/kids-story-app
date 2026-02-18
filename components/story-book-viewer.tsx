@@ -1,14 +1,13 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
 import Button from "@/components/button";
 import { buildStoryPageTexts } from "@/lib/story/pages";
 
 type ContentPage = {
   pageIndex: number;
   text: string;
-  imageStatus: "not_started" | "generating" | "ready" | "failed";
+  imageStatus: "pending" | "not_started" | "generating" | "ready" | "failed";
   imageUrl: string | null;
   imageError: string | null;
 };
@@ -26,6 +25,7 @@ type Props = {
   storyId?: string;
   canManageIllustrations?: boolean;
   storyPages?: ContentPage[];
+  coverImageUrl?: string | null;
 };
 
 function buildPages(
@@ -41,7 +41,7 @@ function buildPages(
       : buildStoryPageTexts(content, lengthMinutes).map((p) => ({
           pageIndex: p.pageIndex,
           text: p.text,
-          imageStatus: "not_started" as const,
+          imageStatus: "pending" as const,
           imageUrl: null,
           imageError: null,
         }));
@@ -59,9 +59,17 @@ export default function StoryBookViewer({
   storyId,
   canManageIllustrations = false,
   storyPages,
+  coverImageUrl = null,
 }: Props) {
-  const router = useRouter();
-  const pages = useMemo(() => buildPages(title, content, lengthMinutes, storyPages), [title, content, lengthMinutes, storyPages]);
+  const [liveStoryPages, setLiveStoryPages] = useState<ContentPage[] | undefined>(storyPages);
+  useEffect(() => {
+    setLiveStoryPages(storyPages);
+  }, [storyPages]);
+
+  const pages = useMemo(
+    () => buildPages(title, content, lengthMinutes, liveStoryPages),
+    [title, content, lengthMinutes, liveStoryPages]
+  );
   const [pageIndex, setPageIndex] = useState(0);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [isGeneratingAll, setIsGeneratingAll] = useState(false);
@@ -88,8 +96,23 @@ export default function StoryBookViewer({
   }, []);
 
   useEffect(() => {
+    if (!isFullscreen) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "ArrowLeft") {
+        event.preventDefault();
+        setPageIndex((prev) => Math.max(0, prev - 1));
+      } else if (event.key === "ArrowRight") {
+        event.preventDefault();
+        setPageIndex((prev) => Math.min(pages.length - 1, prev + 1));
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [isFullscreen, pages.length]);
+
+  useEffect(() => {
     if (!storyId || !canManageIllustrations || totalCount === 0) return;
-    const hasPending = contentPages.some((p) => p.imageStatus === "not_started");
+    const hasPending = contentPages.some((p) => p.imageStatus === "pending" || p.imageStatus === "not_started");
     if (!hasPending) return;
 
     void handleGenerateAll();
@@ -97,10 +120,31 @@ export default function StoryBookViewer({
   }, [storyId, canManageIllustrations, totalCount]);
 
   useEffect(() => {
-    if (generatingCount <= 0) return;
-    const interval = setInterval(() => router.refresh(), 3000);
+    if (!storyId || totalCount === 0) return;
+    const hasWork = contentPages.some((p) => p.imageStatus === "pending" || p.imageStatus === "not_started" || p.imageStatus === "generating");
+    if (!hasWork) return;
+
+    const interval = setInterval(() => {
+      void (async () => {
+        const response = await fetch(`/api/stories/${storyId}/pages`, { cache: "no-store" });
+        if (!response.ok) return;
+        const payload = (await response.json()) as {
+          ok?: boolean;
+          pages?: Array<{
+            pageIndex: number;
+            text: string;
+            imageStatus: "pending" | "not_started" | "generating" | "ready" | "failed";
+            imageUrl: string | null;
+            imageError: string | null;
+          }>;
+        };
+        if (payload.ok && Array.isArray(payload.pages)) {
+          setLiveStoryPages(payload.pages);
+        }
+      })();
+    }, 2500);
     return () => clearInterval(interval);
-  }, [generatingCount, router]);
+  }, [storyId, totalCount, contentPages]);
 
   const panelHeight = isFullscreen
     ? "min-h-[68vh] sm:min-h-[74vh]"
@@ -128,7 +172,14 @@ export default function StoryBookViewer({
       if (!response.ok || !payload.ok) {
         throw new Error(payload.error ?? "Failed to start illustration generation.");
       }
-      router.refresh();
+      const pagesResponse = await fetch(`/api/stories/${storyId}/pages`, { cache: "no-store" });
+      if (pagesResponse.ok) {
+        const payload = (await pagesResponse.json()) as {
+          ok?: boolean;
+          pages?: ContentPage[];
+        };
+        if (payload.ok && payload.pages) setLiveStoryPages(payload.pages);
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to start illustration generation.";
       setActionError(message);
@@ -150,7 +201,14 @@ export default function StoryBookViewer({
       if (!response.ok || !payload.ok) {
         throw new Error(payload.error ?? "Failed to regenerate page illustration.");
       }
-      router.refresh();
+      const pagesResponse = await fetch(`/api/stories/${storyId}/pages`, { cache: "no-store" });
+      if (pagesResponse.ok) {
+        const payload = (await pagesResponse.json()) as {
+          ok?: boolean;
+          pages?: ContentPage[];
+        };
+        if (payload.ok && payload.pages) setLiveStoryPages(payload.pages);
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to regenerate page illustration.";
       setActionError(message);
@@ -208,13 +266,22 @@ export default function StoryBookViewer({
 
         <div className={`rounded-2xl border border-soft-accent bg-soft-accent/45 p-6 grid place-items-center ${panelHeight}`}>
           {current.type === "cover" ? (
-            <div className="text-center">
-              <div className="mx-auto mb-3 h-16 w-16 rounded-2xl bg-secondary/20 grid place-items-center text-secondary font-semibold">
-                Img
+            coverImageUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={coverImageUrl}
+                alt={`Cover illustration for ${title}`}
+                className="h-full w-full rounded-xl object-cover"
+              />
+            ) : (
+              <div className="text-center">
+                <div className="mx-auto mb-3 h-16 w-16 rounded-2xl bg-secondary/20 grid place-items-center text-secondary font-semibold">
+                  Img
+                </div>
+                <p className="text-sm font-medium text-anchor">Generating cover illustration...</p>
+                <p className="mt-1 text-xs text-anchor/65">Cover will appear automatically when ready.</p>
               </div>
-              <p className="text-sm font-medium text-anchor">Cover Illustration Placeholder</p>
-              <p className="mt-1 text-xs text-anchor/65">Image generation starts on story pages</p>
-            </div>
+            )
           ) : current.contentPage?.imageStatus === "ready" && current.contentPage.imageUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img

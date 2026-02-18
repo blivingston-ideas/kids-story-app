@@ -12,6 +12,9 @@ import {
 } from "@/lib/validation/stories";
 import { countWords, getParagraphGuidance, getWordTargets } from "@/lib/story/length";
 import { buildStoryPageTexts } from "@/lib/story/pages";
+import { startStoryIllustrationGeneration } from "@/lib/story/illustration-jobs";
+import { generateStoryStyleBible } from "@/lib/story/style-bible";
+import { z } from "zod";
 
 export type GenerateState = {
   ok: boolean;
@@ -85,6 +88,21 @@ type StorySpec = {
     details: string;
   }>;
 };
+
+function isMissingRelationError(message: string, relation: string): boolean {
+  return (
+    message.includes(`Could not find the table 'public.${relation}'`) ||
+    message.includes(`relation "${relation}" does not exist`)
+  );
+}
+
+function isMissingStoriesColumnError(message: string, column: string): boolean {
+  return (
+    message.includes(`column stories.${column} does not exist`) ||
+    message.includes(`column \"${column}\"`) ||
+    (message.includes("Could not find the") && message.includes(`'${column}'`) && message.includes("'stories'"))
+  );
+}
 
 function randomFrom<T>(list: readonly T[]): T {
   const idx = Math.floor(Math.random() * list.length);
@@ -221,7 +239,7 @@ async function buildStorySpec(input: WizardInput, universeId: string): Promise<S
     selectedKidIds.length > 0
       ? supabase
           .from("profiles_kid")
-          .select("id, display_name, age, themes, books_we_like, character_traits")
+          .select("id, display_name, age, themes, books_we_like")
           .eq("universe_id", universeId)
           .in("id", selectedKidIds)
       : Promise.resolve({ data: [], error: null }),
@@ -248,7 +266,6 @@ async function buildStorySpec(input: WizardInput, universeId: string): Promise<S
       if (!kid) continue;
       const detailParts = [
         typeof kid.age === "number" ? `age ${kid.age}` : null,
-        kid.character_traits?.length ? `traits: ${kid.character_traits.join(", ")}` : null,
         kid.themes?.length ? `themes: ${kid.themes.join(", ")}` : null,
         kid.books_we_like?.length ? `favorite books: ${kid.books_we_like.join(", ")}` : null,
       ].filter((v): v is string => Boolean(v));
@@ -681,7 +698,12 @@ export async function saveStoryAction(formData: FormData): Promise<void> {
     spark: String(formData.get("spark") ?? ""),
   };
 
-  const { data: story, error: storyError } = await supabase
+  const style = await generateStoryStyleBible({
+    audienceAge: Number(input.audienceAge),
+    tone: input.tone,
+    universeName: "Story Universe",
+  });
+  const storyInsertPrimary = await supabase
     .from("stories")
     .insert({
       universe_id: membership.universe_id,
@@ -691,22 +713,146 @@ export async function saveStoryAction(formData: FormData): Promise<void> {
       length_minutes: lengthMinutes,
       prompt: promptJson,
       content: generated.data.content,
+      style_bible: style.styleBible,
+      style_id: style.styleId,
+      image_model: "gpt-image-1-mini",
+      style_version: 1,
     })
     .select("id")
     .single();
-
+  const storyInsertFallback =
+    storyInsertPrimary.error &&
+    (isMissingStoriesColumnError(storyInsertPrimary.error.message, "style_bible") ||
+      isMissingStoriesColumnError(storyInsertPrimary.error.message, "style_id") ||
+      isMissingStoriesColumnError(storyInsertPrimary.error.message, "image_model") ||
+      isMissingStoriesColumnError(storyInsertPrimary.error.message, "style_version"))
+      ? await supabase
+          .from("stories")
+          .insert({
+            universe_id: membership.universe_id,
+            created_by: user.id,
+            title: generated.data.title,
+            tone: input.tone,
+            length_minutes: lengthMinutes,
+            prompt: promptJson,
+            content: generated.data.content,
+          })
+          .select("id")
+          .single()
+      : null;
+  const story = storyInsertFallback ? storyInsertFallback.data : storyInsertPrimary.data;
+  const storyError = storyInsertFallback ? storyInsertFallback.error : storyInsertPrimary.error;
   if (storyError) throw new Error(storyError.message);
+  if (!story) throw new Error("Failed to create story.");
 
-  const pageRows = buildStoryPageTexts(generated.data.content, lengthMinutes).map((page) => ({
-    story_id: story.id,
-    page_index: page.pageIndex,
-    text: page.text,
-    image_status: "not_started" as const,
-  }));
+  const generatedPagesSchema = z.array(
+    z.object({
+      page_number: z.number().int().min(1),
+      text: z.string().trim().min(1),
+    })
+  );
+  const generationCostsSchema = z.array(
+    z.object({
+      page_number: z.number().int().min(0).nullable(),
+      step: z.string().trim().min(1),
+      provider: z.literal("openai"),
+      model: z.string().trim().min(1),
+      input_tokens: z.number().int().min(0),
+      output_tokens: z.number().int().min(0),
+      total_tokens: z.number().int().min(0),
+      cached_input_tokens: z.number().int().min(0).nullable(),
+      reasoning_tokens: z.number().int().min(0).nullable(),
+      cost_usd: z.number().min(0),
+      response_id: z.string().trim().min(1).nullable(),
+    })
+  );
+  const storyBibleSchema = z.record(z.string(), z.unknown());
+  const beatSheetSchema = z.record(z.string(), z.unknown());
+  const ledgerSchema = z.record(z.string(), z.unknown());
+
+  const generationCostsRaw = String(formData.get("generationCostsJson") ?? "[]");
+  const pagesRaw = String(formData.get("generatedPagesJson") ?? "[]");
+  const storyBibleRaw = String(formData.get("storyBibleJson") ?? "{}");
+  const beatSheetRaw = String(formData.get("beatSheetJson") ?? "{}");
+  const ledgerRaw = String(formData.get("continuityLedgerJson") ?? "{}");
+
+  let parsedPages: Array<{ page_number: number; text: string }> = [];
+  let parsedGenerationCosts: Array<z.infer<typeof generationCostsSchema>[number]> = [];
+  try {
+    const parsed = generationCostsSchema.safeParse(JSON.parse(generationCostsRaw));
+    if (parsed.success) parsedGenerationCosts = parsed.data;
+  } catch {
+    // ignore malformed tracking payloads
+  }
+  try {
+    const parsed = generatedPagesSchema.safeParse(JSON.parse(pagesRaw));
+    if (parsed.success) parsedPages = parsed.data;
+  } catch {
+    // Fall through to text splitting fallback.
+  }
+
+  const pageRows =
+    parsedPages.length > 0
+      ? parsedPages
+          .sort((a, b) => a.page_number - b.page_number)
+          .map((page) => ({
+            story_id: story.id,
+            page_index: page.page_number - 1,
+            text: page.text,
+            image_status: "pending" as const,
+          }))
+      : buildStoryPageTexts(generated.data.content, lengthMinutes).map((page) => ({
+          story_id: story.id,
+          page_index: page.pageIndex,
+          text: page.text,
+          image_status: "pending" as const,
+        }));
 
   if (pageRows.length > 0) {
     const { error: pageError } = await supabase.from("story_pages").insert(pageRows);
     if (pageError) throw new Error(pageError.message);
+  }
+
+  let storyBibleJson: Record<string, unknown> = {};
+  let beatSheetJson: Record<string, unknown> = {};
+  let continuityLedgerJson: Record<string, unknown> = {};
+
+  try {
+    const s = storyBibleSchema.safeParse(JSON.parse(storyBibleRaw));
+    if (s.success) storyBibleJson = s.data;
+  } catch {
+    // ignore
+  }
+
+  try {
+    const b = beatSheetSchema.safeParse(JSON.parse(beatSheetRaw));
+    if (b.success) beatSheetJson = b.data;
+  } catch {
+    // ignore
+  }
+
+  try {
+    const l = ledgerSchema.safeParse(JSON.parse(ledgerRaw));
+    if (l.success) continuityLedgerJson = l.data;
+  } catch {
+    // ignore
+  }
+
+  if (
+    Object.keys(storyBibleJson).length > 0 ||
+    Object.keys(beatSheetJson).length > 0 ||
+    Object.keys(continuityLedgerJson).length > 0
+  ) {
+    const { error: bibleError } = await supabase.from("story_bibles").insert({
+      story_id: story.id,
+      universe_id: membership.universe_id,
+      story_bible_json: storyBibleJson,
+      beat_sheet_json: beatSheetJson,
+      continuity_ledger_json: continuityLedgerJson,
+    });
+    if (bibleError && !isMissingRelationError(bibleError.message, "story_bibles")) {
+      throw new Error(bibleError.message);
+    }
   }
 
   type StoryCharacterInsert = {
@@ -720,7 +866,7 @@ export async function saveStoryAction(formData: FormData): Promise<void> {
     story_id: story.id,
     character_type: c.type,
     character_id: c.id,
-    custom_name: null,
+    custom_name: c.label,
   }));
 
   if (input.customCharacterName) {
@@ -735,6 +881,34 @@ export async function saveStoryAction(formData: FormData): Promise<void> {
   if (characterRows.length > 0) {
     const { error: characterError } = await supabase.from("story_characters").insert(characterRows);
     if (characterError) throw new Error(characterError.message);
+  }
+
+  if (parsedGenerationCosts.length > 0) {
+    const rows = parsedGenerationCosts.map((row) => ({
+      story_id: story.id,
+      page_number: row.page_number,
+      step: row.step,
+      provider: row.provider,
+      model: row.model,
+      input_tokens: row.input_tokens,
+      output_tokens: row.output_tokens,
+      total_tokens: row.total_tokens,
+      cached_input_tokens: row.cached_input_tokens,
+      reasoning_tokens: row.reasoning_tokens,
+      cost_usd: Number(row.cost_usd.toFixed(6)),
+      response_id: row.response_id,
+    }));
+    const { error: costError } = await supabase.from("generation_costs").insert(rows);
+    if (costError && !isMissingRelationError(costError.message, "generation_costs")) {
+      throw new Error(costError.message);
+    }
+  }
+
+  // Kick off async illustration generation immediately after save.
+  try {
+    await startStoryIllustrationGeneration(story.id);
+  } catch {
+    // Non-blocking: reader UI can still trigger generation manually.
   }
 
   redirect(`/story/${story.id}`);

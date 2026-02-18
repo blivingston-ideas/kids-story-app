@@ -13,7 +13,6 @@ type KidProfile = {
   age: number | null;
   themes: string[] | null;
   books_we_like: string[] | null;
-  character_traits: string[] | null;
 };
 
 type AdultProfile = {
@@ -363,9 +362,9 @@ export async function parseOutlineStrict(
 
 function getCharacterSummary(storyBible: StoryBible): string {
   const kids = storyBible.kids.map((k) => {
-    const traits = k.character_traits?.length ? `traits: ${k.character_traits.join(", ")}` : "kind kid";
     const themes = k.themes?.length ? `themes: ${k.themes.join(", ")}` : "";
-    return `Kid ${k.display_name}${k.age ? ` (age ${k.age})` : ""}; ${traits}${themes ? `; ${themes}` : ""}`;
+    const books = k.books_we_like?.length ? `books: ${k.books_we_like.join(", ")}` : "";
+    return `Kid ${k.display_name}${k.age ? ` (age ${k.age})` : ""}${themes ? `; ${themes}` : ""}${books ? `; ${books}` : ""}`;
   });
   const adults = storyBible.adults.map((a) => {
     const persona = a.persona_label ? `persona: ${a.persona_label}` : "supportive adult";
@@ -586,7 +585,10 @@ function fallbackOutline(input: PipelineInput, sceneCount: number): Outline {
   const baseCharacters = [
     ...input.storyBible.kids.map((k) => ({
       name: k.display_name,
-      traits: k.character_traits?.length ? k.character_traits : ["curious", "kind"],
+      traits:
+        [...(k.themes ?? []), ...(k.books_we_like ?? [])].slice(0, 3).filter(Boolean).length > 0
+          ? [...(k.themes ?? []), ...(k.books_we_like ?? [])].slice(0, 3).filter(Boolean)
+          : ["curious", "kind"],
       relationship: "family kid",
     })),
     ...input.storyBible.adults.map((a) => ({
